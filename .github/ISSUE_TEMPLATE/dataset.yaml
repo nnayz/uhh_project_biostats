@@ -1,0 +1,42 @@
+name: Dataset Acquisition & Curation
+description: Download, validate, and document the raw dataset
+labels: ["milestone-2", "owner:aftab"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### Owner
+        **Aftab**
+
+        ### Shadow
+        **Nasrul**
+
+  - type: textarea
+    attributes:
+      label: Task Description
+      value: |
+        - Select primary dataset (e.g., Visium)
+        - Download dataset (HF or repo scripts)
+        - Verify metadata fields (batch/slide/patient, spatial coords, labels)
+        - Document dataset structure
+
+  - type: textarea
+    attributes:
+      label: Deliverables
+      value: |
+        - data/raw/
+        - docs/data_dictionary.md
+        - Basic dataset stats (counts, labels)
+
+  - type: textarea
+    attributes:
+      label: Dependencies
+      value: |
+        - None (starting point of Milestone 2)
+
+  - type: textarea
+    attributes:
+      label: Definition of Done
+      value: |
+        - Any team member can load raw data without clarification
+        - Metadata fields are clearly explained
