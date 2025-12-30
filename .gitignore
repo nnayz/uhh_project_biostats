@@ -8,7 +8,14 @@ wheels/
 
 # Virtual environments
 .venv
+venv
 
 # Data files (too large for git)
 data/raw/*.h5ad
 data/raw/*.json
+
+data/raw/*.h5ad
+data/raw/*.json
+
+
+data/processed/
