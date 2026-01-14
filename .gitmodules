@@ -1,0 +1,3 @@
+[submodule "temp_nicheformer"]
+	path = temp_nicheformer
+	url = https://github.com/theislab/nicheformer.git

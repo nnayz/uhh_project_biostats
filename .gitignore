@@ -17,8 +17,37 @@ venv/
 data/raw/*.h5ad
 data/processed/**/*.parquet
 
+# Pretrained model checkpoints (very large files - 500MB+)
+data/pretrained/**/*.ckpt
+data/pretrained/**/*.pt
+data/pretrained/**/*.pth
+data/pretrained/**/*.pkl
+
 # Outputs (keep structure, ignore contents)
 outputs/**/*
 !outputs/.gitkeep
 !outputs/milestone2/.gitkeep
 !outputs/milestone3/.gitkeep
+
+# Results (model checkpoints and large outputs)
+results/**/*model*.pt
+results/**/*model*.ckpt
+results/**/*model*.pth
+results/**/*.pkl
+results/**/*.h5
+results/**/*.hdf5
+
+# Model checkpoints (anywhere - PyTorch/Lightning checkpoints)
+*.ckpt
+*model*.pt
+*model*.pth
+*checkpoint*.pt
+*checkpoint*.pth
+*_final.pt
+*best*.pt
+
+# Temporary test outputs
+outputs/test_*/
+
+# Git submodules (tracked separately, but ignore if accidentally cloned)
+# Note: temp_nicheformer is a submodule pointing to https://github.com/theislab/nicheformer.git

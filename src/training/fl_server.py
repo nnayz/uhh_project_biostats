@@ -90,12 +90,16 @@ def aggregate_fit_metrics(
     Returns:
         Aggregated training metrics
     """
-    metrics_list = [
-        (fit_res.num_examples, fit_res.metrics)
-        for _, fit_res in results
-        if fit_res.metrics
-    ]
-    return weighted_average(metrics_list)
+    metrics_list = []
+    for _, fit_res in results:
+        # Handle both old and new Flower API
+        if hasattr(fit_res, 'metrics') and fit_res.metrics:
+            metrics_list.append((fit_res.num_examples, fit_res.metrics))
+        elif hasattr(fit_res, 'status') and hasattr(fit_res.status, 'metrics'):
+            # New API: metrics might be in status
+            if fit_res.status.metrics:
+                metrics_list.append((fit_res.num_examples, fit_res.status.metrics))
+    return weighted_average(metrics_list) if metrics_list else {}
 
 
 def aggregate_evaluate_metrics(
@@ -112,12 +116,16 @@ def aggregate_evaluate_metrics(
     Returns:
         Aggregated evaluation metrics
     """
-    metrics_list = [
-        (eval_res.num_examples, eval_res.metrics)
-        for _, eval_res in results
-        if eval_res.metrics
-    ]
-    return weighted_average(metrics_list)
+    metrics_list = []
+    for _, eval_res in results:
+        # Handle both old and new Flower API
+        if hasattr(eval_res, 'metrics') and eval_res.metrics:
+            metrics_list.append((eval_res.num_examples, eval_res.metrics))
+        elif hasattr(eval_res, 'status') and hasattr(eval_res.status, 'metrics'):
+            # New API: metrics might be in status
+            if eval_res.status.metrics:
+                metrics_list.append((eval_res.num_examples, eval_res.status.metrics))
+    return weighted_average(metrics_list) if metrics_list else {}
 
 
 # ---------------------------------------------------------------------------

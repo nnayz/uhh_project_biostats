@@ -1,13 +1,14 @@
 """
 Nicheformer Model Wrapper - Milestone 3 (stabilized pretrained fine-tuning)
 
-Key fixes:
+Key features:
 1) Always create an input adapter in __init__ so it is part of model.parameters()
    BEFORE the optimizer is created (no "created during forward" params).
 2) Infer backbone embedding dim from the loaded Nicheformer encoder and build the
    classifier to match it (prevents 256 vs 512 mismatch).
 3) Provide parameter groups so backbone LR can be smaller than head/adapter LR.
 4) Add basic spatial scaling to avoid huge coordinate magnitudes destabilizing training.
+5) Requires Nicheformer package - no placeholder fallback.
 
 Contract Reference: docs/milestone3/contracts/model_contract.md
 """
@@ -38,8 +39,8 @@ class NicheformerWrapper(nn.Module):
         pretrained_path: Optional[str] = None,
         fine_tune_mode: str = "head_only",
         include_spatial: bool = True,
-        hidden_dim: int = 256,           # used only for placeholder/new model
-        num_layers: int = 4,             # used only for placeholder/new model
+        hidden_dim: int = 256,           # used for new Nicheformer model (when no pretrained_path)
+        num_layers: int = 4,             # used for new Nicheformer model (when no pretrained_path)
         dropout: float = 0.1,
         spatial_scale: float = 1000.0,   # divide x,y by this when include_spatial=True
         backbone_lr_mult: float = 0.1,   # backbone lr = base_lr * this (for partial/full)
@@ -56,8 +57,8 @@ class NicheformerWrapper(nn.Module):
         # Input dimension: genes (+ optional x,y)
         self.input_dim = num_genes + (2 if include_spatial else 0)
 
-        # Load backbone (real Nicheformer encoder if checkpoint is provided)
-        self.backbone, self._using_nicheformer = self._load_backbone(
+        # Load backbone (Nicheformer encoder - required)
+        self.backbone = self._load_backbone(
             pretrained_path=pretrained_path,
             hidden_dim=hidden_dim,
             num_layers=num_layers,
@@ -100,24 +101,43 @@ class NicheformerWrapper(nn.Module):
         pretrained_path: Optional[str],
         hidden_dim: int,
         num_layers: int,
-    ) -> Tuple[nn.Module, bool]:
+    ) -> nn.Module:
         """
-        Try loading the real Nicheformer checkpoint.
-        Fall back to a lightweight placeholder transformer encoder.
+        Load the Nicheformer backbone.
+        Requires nicheformer package to be installed.
         """
         try:
             import nicheformer  # noqa: F401
             from nicheformer.models import Nicheformer  # type: ignore
+        except ImportError as e:
+            raise ImportError(
+                "Nicheformer package is required but not installed. "
+                "Please install it: cd temp_nicheformer && pip install -e ."
+            ) from e
 
-            if pretrained_path and os.path.exists(pretrained_path):
-                print(f"Loading pretrained Nicheformer from {pretrained_path}")
+        if pretrained_path and os.path.exists(pretrained_path):
+            print(f"Loading pretrained Nicheformer from {pretrained_path}")
+            try:
                 # Lightning checkpoint
-                nf = Nicheformer.load_from_checkpoint(pretrained_path, map_location="cpu")
+                # Note: weights_only=False is needed for PyTorch 2.6+ due to numpy objects in checkpoint
+                # This is safe since the checkpoint is from the official Nicheformer repository
+                import torch.serialization
+                torch.serialization.add_safe_globals([type(torch.tensor(0).numpy().item())])
+                nf = Nicheformer.load_from_checkpoint(
+                    pretrained_path, 
+                    map_location="cpu",
+                    weights_only=False  # Required for checkpoints with numpy objects
+                )
                 print("Successfully loaded Nicheformer backbone")
-                return nf.encoder, True
+                return nf.encoder
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to load pretrained Nicheformer from {pretrained_path}: {e}"
+                ) from e
 
-            # No checkpoint: create a fresh Nicheformer (still uses its encoder)
-            print("Creating new Nicheformer model (no pretrained weights)")
+        # No checkpoint: create a fresh Nicheformer (still uses its encoder)
+        print("Creating new Nicheformer model (no pretrained weights)")
+        try:
             nf = Nicheformer(
                 dim_model=hidden_dim,
                 nheads=8,
@@ -134,22 +154,9 @@ class NicheformerWrapper(nn.Module):
                 max_epochs=10,
             )
             print("Created new Nicheformer model")
-            return nf.encoder, True
-
+            return nf.encoder
         except Exception as e:
-            # If nicheformer not installed OR loading fails, use placeholder.
-            print(f"Nicheformer backbone unavailable ({e}). Using placeholder backbone.")
-            return self._create_placeholder_backbone(hidden_dim=hidden_dim, num_layers=num_layers), False
-
-    def _create_placeholder_backbone(self, hidden_dim: int, num_layers: int) -> nn.Module:
-        enc_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_dim,
-            nhead=8,
-            dim_feedforward=hidden_dim * 4,
-            dropout=0.1,
-            batch_first=True,
-        )
-        return nn.TransformerEncoder(enc_layer, num_layers=num_layers)
+            raise RuntimeError(f"Failed to create Nicheformer model: {e}") from e
 
     def _infer_backbone_dim(self, backbone: nn.Module, default: int) -> int:
         """

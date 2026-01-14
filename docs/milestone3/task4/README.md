@@ -447,19 +447,111 @@ The design supports easy extension:
 
 
 
-## Notes
+## Nicheformer Integration
 
-- **Nicheformer Integration (Milestone 3):** The model wrapper now includes integration with the actual Nicheformer model! It will automatically:
-  - Try to import the Nicheformer package
-  - Load pretrained weights if `pretrained_path` is provided
-  - Fall back to a placeholder backbone if Nicheformer is not available
-  
-  **To use actual Nicheformer:**
-  1. Install Nicheformer: `git clone https://github.com/theislab/nicheformer.git && cd nicheformer && pip install -e .`
-  2. Download pretrained weights from [Mendeley Data](https://data.mendeley.com/preview/87gm9hrgm8)
-  3. Provide the checkpoint path when creating the model: `create_model(..., pretrained_path="path/to/nicheformer.ckpt")`
-  
-  The wrapper will automatically detect and use Nicheformer when available!
+### ✅ Installation Complete
+
+Nicheformer has been successfully installed and integrated:
+
+- **Repository:** Added as **Git submodule** at `temp_nicheformer/` pointing to https://github.com/theislab/nicheformer.git
+- **Commit:** `485cadbc5caa15119adfd54228f8a8af835fcabc` (main branch)
+- **Package:** Installed in editable mode in `niche` conda environment
+- **Dependencies:** PyTorch Lightning, torchmetrics, wandb, and other core dependencies installed
+- **Status:** Fully functional and tested
+
+**Note:** `temp_nicheformer` is a Git submodule, not a regular directory. This means:
+- It points to the official Nicheformer repository
+- No code duplication in your repository
+- To clone this repo with submodules: `git clone --recurse-submodules <repo-url>`
+- To update submodule after cloning: `git submodule update --init --recursive`
+
+### Git Submodule Details
+
+**What is a Git Submodule?**
+
+A Git submodule allows you to include one Git repository as a subdirectory of another Git repository. Instead of copying the entire Nicheformer codebase, it creates a **reference** to the official repository at a specific commit.
+
+**Benefits:**
+- ✅ **No code duplication** - Points to the official repo, doesn't copy it
+- ✅ **Easy updates** - Can update to newer commits when needed
+- ✅ **Smaller repository** - Your repo stays small
+- ✅ **Version control** - Tracks which commit of Nicheformer you're using
+- ✅ **Clean separation** - Nicheformer code stays separate from your code
+
+**For Repository Owner:**
+- The submodule is tracked in `.gitmodules` file
+- You commit the submodule reference (not the code)
+- To update to a newer Nicheformer version:
+  ```bash
+  cd temp_nicheformer
+  git checkout main  # or specific commit/tag
+  git pull
+  cd ..
+  git add temp_nicheformer
+  git commit -m "Update Nicheformer submodule to latest"
+  ```
+
+**For Others (Cloning Your Repo):**
+They need to initialize submodules:
+```bash
+# Clone your repo
+git clone <your-repo-url>
+
+# Initialize and update submodules
+git submodule update --init --recursive
+
+# Or clone with submodules in one command
+git clone --recurse-submodules <your-repo-url>
+```
+
+After cloning, they still need to install Nicheformer:
+```bash
+conda activate niche  # or their environment
+cd temp_nicheformer
+pip install -e .
+```
+
+### ✅ Pretrained Weights
+
+- **Location:** `data/pretrained/nicheformer_pretrained.ckpt` (545.71 MB)
+- **Source:** Downloaded from [Mendeley Data](https://data.mendeley.com/preview/87gm9hrgm8)
+- **Status:** Successfully tested and working
+
+**Test Results:**
+- ✅ Model loading: Successfully loads pretrained checkpoint
+- ✅ Forward pass: Works correctly (input: [4, 250], output: [4, 22])
+- ✅ Loss computation: Cross-entropy loss works
+- ✅ Parameter counts: 25.5M total, 267K trainable (head_only mode)
+
+### Model Wrapper Status
+
+**Current Implementation:**
+- ✅ **Nicheformer-only** - No placeholder fallback
+- ✅ **Requires Nicheformer** - Raises clear error if not installed
+- ✅ **Pretrained weights support** - Loads checkpoint with `weights_only=False` (PyTorch 2.6+ compatibility)
+- ✅ **Fine-tuning modes** - head_only, partial, full all working
+
+**Usage:**
+```python
+from src.model import create_model
+
+# With pretrained weights
+model = create_model(
+    num_genes=248,
+    num_labels=22,
+    pretrained_path="data/pretrained/nicheformer_pretrained.ckpt",
+    fine_tune_mode="head_only"
+)
+
+# Without pretrained weights (creates new Nicheformer)
+model = create_model(
+    num_genes=248,
+    num_labels=22,
+    fine_tune_mode="head_only"
+)
+```
+
+**Note:** The wrapper requires Nicheformer to be installed. If not available, it will raise an `ImportError` with clear instructions.
 - **Milestone 4 Extensions:** Milestone 4 focuses on extending the model with different objectives (neighborhood prediction, interaction modeling, contrastive learning) rather than basic integration. The model wrapper is designed to support these extensions.
 - Data loaders assume Milestone 2 data structure. Ensure `data/processed/clients/` exists.
 - All functions are device-agnostic (CPU/CUDA).
@@ -470,5 +562,25 @@ The design supports easy extension:
 ## Summary
 
 This task provides the foundation for all training activities in Milestone 3. All team members should use these modules rather than implementing their own data loading or training logic. This ensures consistency, reusability, and makes it easier to extend for Milestone 4.
+
+---
+
+## Testing & Verification
+
+Task 4 has been tested and verified by running Task 1 (centralized) and Task 2 (federated) scripts:
+
+✅ **Centralized Test:** 1 epoch completed successfully
+- Train: Loss=0.35, Accuracy=0.89, F1=0.86
+- Test: Loss=0.32, Accuracy=0.90, F1=0.87
+
+✅ **Federated Test:** 1 round completed successfully  
+- Train: Loss=1.99, Accuracy=0.41
+- Test: Loss=1.17, Accuracy=0.69, F1=0.46
+
+All outputs generated correctly (model, history, metrics, plots).
+
+**See:** `docs/milestone3/task4/TEST_RESULTS.md` for detailed test results.
+
+---
 
 **Questions?** Refer to the contracts in `docs/milestone3/contracts/` or check the test script `scripts/milestone3/test_training_engine.py` for usage examples.

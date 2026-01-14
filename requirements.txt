@@ -1,17 +1,41 @@
-# Core dependencies for Milestone 3
+# ============================================================================
+# Nicheformer on Mouse Brain Transcriptomics Data
+# Requirements File
+# ============================================================================
+
+# Core ML/DL Framework
 torch>=2.0.0
-pandas>=1.5.0
 numpy>=1.23.0
+pandas>=1.5.0
 scikit-learn>=1.2.0
 
-# Federated learning (Milestone 3 - Task 2)
-flwr>=1.5.0  # Flower for federated learning
+# Federated Learning (Milestone 3 - Task 2)
+flwr>=1.5.0  # Flower framework for federated learning
 
-# Data processing (for Milestone 2 pipeline)
-scanpy>=1.9.0
-huggingface-hub>=0.16.0
-pyarrow>=10.0.0  # For parquet support
+# Data Processing (Milestone 2)
+scanpy>=1.9.0  # Single-cell analysis
+huggingface-hub>=0.16.0  # For downloading datasets
+pyarrow>=10.0.0  # Parquet file support
 
-# Optional but recommended
-matplotlib>=3.6.0  # For plotting
-seaborn>=0.12.0   # For better plots
+# Visualization & Plotting
+matplotlib>=3.6.0
+seaborn>=0.12.0
+
+# ============================================================================
+# Nicheformer Dependencies
+# ============================================================================
+# Note: Nicheformer is installed separately from temp_nicheformer/ submodule
+# The following are dependencies of Nicheformer (installed when you run:
+# cd temp_nicheformer && pip install -e .)
+#
+# pytorch-lightning>=2.0.0
+# torchmetrics>=1.4.0
+# wandb>=0.17.0
+# anndata
+# squidpy
+# pyensembl==2.3.13
+# merlin-core>=23.8.0
+# merlin-dataloader>=23.8.0
+# dask>=2024.1.1
+# numba>=0.59.0
+# ============================================================================
