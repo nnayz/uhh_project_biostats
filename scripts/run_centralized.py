@@ -132,19 +132,30 @@ def main() -> None:
     parser.add_argument("--output_dir", type=str, default="results/centralized", help="Output directory")
     parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda"], help="Training device")
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=512, help="Batch size")
+    parser.add_argument("--batch_size", type=int, default=1024, help="Batch size (increased for GPU utilization)")
     parser.add_argument("--lr", type=float, default=8e-4, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
     parser.add_argument("--fine_tune_mode", type=str, default="head_only", choices=["head_only", "partial", "full"])
     parser.add_argument("--include_spatial", action="store_true", default=True, help="Include spatial coords")
     parser.add_argument("--no_spatial", action="store_true", help="Disable spatial coords")
     parser.add_argument("--pretrained_path", type=str, default=None, help="Optional pretrained Nicheformer checkpoint")
-    parser.add_argument("--num_workers", type=int, default=0)
+    parser.add_argument("--num_workers", type=int, default=None, help="Number of data loading workers (0=main thread, 4-8 recommended for GPU). Auto-set to 0 on Windows.")
+    parser.add_argument("--use_amp", action="store_true", default=True, help="Use Automatic Mixed Precision (AMP) for faster training")
+    parser.add_argument("--no_amp", action="store_true", help="Disable AMP")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max_train", type=int, default=None, help="Optional cap for training rows (debug)")
     parser.add_argument("--max_val", type=int, default=None, help="Optional cap for val rows (debug)")
     parser.add_argument("--max_test", type=int, default=None, help="Optional cap for test rows (debug)")
     args = parser.parse_args()
+    
+    # Auto-set num_workers on Windows (multiprocessing issues)
+    import platform
+    if args.num_workers is None:
+        if platform.system() == 'Windows':
+            args.num_workers = 0
+            print("[INFO] Windows detected: Setting num_workers=0 (multiprocessing can cause issues on Windows)")
+        else:
+            args.num_workers = 4  # Default for Linux/Mac
 
     include_spatial = args.include_spatial and not args.no_spatial
 
@@ -204,6 +215,13 @@ def main() -> None:
     device = torch.device(args.device if (args.device == "cpu" or torch.cuda.is_available()) else "cpu")
     model.to(device)
 
+    # Setup AMP (Automatic Mixed Precision) for GPU training
+    use_amp = args.use_amp and not args.no_amp and device.type == 'cuda'
+    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+    
+    if use_amp:
+        print("Using Automatic Mixed Precision (AMP) for faster GPU training")
+
     optimizer = create_optimizer(model, learning_rate=args.lr, weight_decay=args.weight_decay)
     scheduler = create_scheduler(optimizer, scheduler_type="cosine", num_epochs=args.epochs)
 
@@ -211,21 +229,22 @@ def main() -> None:
 
     print(f"Centralized training on pooled clients: {clients}")
     print(f"Train/Val/Test sizes: {len(train_df):,} / {len(val_df):,} / {len(test_df):,}")
+    print(f"Device: {device}, Batch size: {args.batch_size}, Workers: {args.num_workers}")
     if hasattr(model, "count_parameters"):
         total_params, trainable_params = model.count_parameters()
         print(f"Model params: total={total_params:,}, trainable={trainable_params:,}")
 
     for epoch in range(1, args.epochs + 1):
         print(f"\nEpoch {epoch}/{args.epochs}")
-        train_metrics = train_one_epoch(model, train_loader, optimizer, device, verbose=True)
-        val_metrics = evaluate(model, val_loader, device, verbose=True)
+        train_metrics = train_one_epoch(model, train_loader, optimizer, device, verbose=True, use_amp=use_amp, scaler=scaler)
+        val_metrics = evaluate(model, val_loader, device, verbose=True, use_amp=use_amp)
         history.add_train_metrics(train_metrics)
         history.add_val_metrics(val_metrics)
         if scheduler is not None:
             scheduler.step()
 
     print("\nFinal evaluation on pooled test")
-    pooled_test = evaluate(model, test_loader, device, verbose=True)
+    pooled_test = evaluate(model, test_loader, device, verbose=True, use_amp=use_amp)
 
     per_client_test: Dict[str, Dict[str, float]] = {}
     for cid in clients:
@@ -236,7 +255,7 @@ def main() -> None:
             pin_memory=(args.device == "cuda"),
         )
         print(f"Client {cid} test:")
-        m = evaluate(model, cloader, device, verbose=True)
+        m = evaluate(model, cloader, device, verbose=True, use_amp=use_amp)
         per_client_test[cid] = {"loss": m["loss"], "accuracy": m["accuracy"], "f1_macro": m["f1_macro"]}
 
     _save_training_curves(history, plots_dir / "loss_curve.png")

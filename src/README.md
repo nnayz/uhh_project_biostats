@@ -71,6 +71,7 @@ Implements the **Training Contract** functions:
 - Tracks loss, accuracy, F1-macro
 - Saves history.json, metrics.csv, model_final.pt, config.json
 - Device-agnostic (CPU/CUDA)
+- **GPU Optimizations:** AMP support, non-blocking transfers, parallel data loading
 
 ### 4. Configuration (`src/config.py`)
 

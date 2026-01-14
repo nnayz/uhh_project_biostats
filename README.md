@@ -35,6 +35,7 @@ This project applies **Nicheformer** (a transformer-based foundation model for s
 - ✅ **Data Pipeline** - Complete preprocessing and federated partitioning
 - ✅ **Model Wrapper** - Standardized interface for fine-tuning modes (head_only, partial, full)
 - ✅ **Shared Training Engine** - Reusable training and evaluation functions
+- ✅ **GPU Optimizations** - AMP, parallel data loading, optimized batch sizes for maximum GPU utilization
 
 ---
 
@@ -116,73 +117,6 @@ python scripts/data_preparation/client_stats.py
 
 ---
 
-## 📁 Project Structure
-
-```
-Nicheformer-On-Mouse-Brain-Transcriptomics-Data/
-├── data/
-│   ├── raw/                          # Raw datasets (downloaded)
-│   ├── processed/                    # Processed data (Milestone 2)
-│   │   ├── processed_table.parquet
-│   │   ├── genes.txt                 # Gene schema (248 genes)
-│   │   ├── label_map.json            # Label mapping (22 labels)
-│   │   └── clients/                  # Federated client data
-│   │       ├── client_01/
-│   │       ├── client_02/
-│   │       └── client_03/
-│   └── pretrained/                   # Pretrained Nicheformer weights
-│       └── nicheformer_pretrained.ckpt
-│
-├── src/                              # Core source code
-│   ├── data/
-│   │   └── loaders.py                # Data loading & validation
-│   ├── model/
-│   │   └── nicheformer_wrapper.py    # Nicheformer model wrapper
-│   ├── training/
-│   │   ├── train_engine.py           # Shared training functions
-│   │   ├── fl_client.py              # Flower client
-│   │   └── fl_server.py              # Flower server utilities
-│   └── config.py                     # Configuration management
-│
-├── scripts/
-│   ├── data_preparation/             # Milestone 2 pipeline
-│   │   ├── download_raw.py
-│   │   ├── validate_raw.py
-│   │   ├── preprocess.py
-│   │   ├── partition_clients.py
-│   │   └── client_stats.py
-│   ├── run_centralized.py            # Task 1: Centralized training
-│   ├── run_federated.py              # Task 2: Federated training
-│   └── milestone3/
-│       ├── test_training_engine.py
-│       └── download_nicheformer_weights.py
-│
-├── docs/
-│   ├── milestone2/                   # Milestone 2 documentation
-│   └── milestone3/                   # Milestone 3 documentation
-│       ├── contracts/                # API contracts
-│       ├── task1 — Centralized Baseline Training/
-│       ├── task2-federated-orchestration/
-│       └── task4/
-│
-├── outputs/                          # Training outputs
-│   ├── milestone2/                   # Milestone 2 outputs
-│   └── milestone3/                   # Milestone 3 outputs
-│
-├── results/                          # Model checkpoints & final results
-│   ├── centralized/
-│   └── federated/
-│
-├── temp_nicheformer/                 # Git submodule → Nicheformer repo
-│   └── (points to github.com/theislab/nicheformer)
-│
-├── requirements.txt                  # Python dependencies
-├── .gitignore                        # Git ignore patterns
-└── README.md                         # This file
-```
-
----
-
 ## 🚀 Setup & Installation
 
 ### Prerequisites
@@ -190,7 +124,8 @@ Nicheformer-On-Mouse-Brain-Transcriptomics-Data/
 - **Python:** 3.9 or newer
 - **Conda/Mamba:** Recommended for environment management
 - **Git:** For cloning repository and submodules
-- **CUDA:** Optional, for GPU acceleration (PyTorch)
+- **CUDA:** Optional, for GPU acceleration (PyTorch with CUDA support)
+  - **Note:** Install CUDA-enabled PyTorch for GPU training. CPU-only PyTorch will limit performance.
 
 ### Step 1: Clone Repository
 
@@ -263,41 +198,51 @@ python scripts/data_preparation/client_stats.py
 
 ## 🏃 Quick Start
 
-### 1. Centralized Training
+### 1. Centralized Training (GPU Optimized)
 
 ```bash
 # Activate environment
 conda activate niche
 
-# Run centralized training
+# Run centralized training with GPU optimizations
 python scripts/run_centralized.py \
     --data_dir data/processed \
     --output_dir results/centralized \
-    --num_epochs 10 \
-    --batch_size 32 \
-    --learning_rate 1e-4 \
+    --device cuda \
+    --epochs 10 \
+    --batch_size 1024 \
+    --lr 1e-4 \
     --fine_tune_mode head_only \
-    --pretrained_path data/pretrained/nicheformer_pretrained.ckpt
+    --pretrained_path data/pretrained/nicheformer_pretrained.ckpt \
+    --num_workers 4 \
+    --use_amp
 ```
 
-### 2. Federated Training
+**GPU Optimizations:**
+- `--batch_size 1024` - Increased for better GPU utilization
+- `--num_workers 4` - Parallel data loading to prevent GPU starvation
+- `--use_amp` - Automatic Mixed Precision for ~2x speedup
+- `--device cuda` - Use GPU acceleration
+
+### 2. Federated Training (GPU Optimized)
 
 ```bash
-# Terminal 1: Start Flower server
+# Run federated training with GPU optimizations
 python scripts/run_federated.py \
-    --mode server \
     --data_dir data/processed \
     --output_dir results/federated \
-    --num_rounds 10 \
-    --num_clients 3
-
-# Terminal 2-N: Start Flower clients (one per client)
-python scripts/run_federated.py \
-    --mode client \
-    --data_dir data/processed \
-    --client_id client_01 \
-    --server_address localhost:8080
+    --num_rounds 5 \
+    --clients_per_round 3 \
+    --local_epochs 2 \
+    --batch_size 1024 \
+    --lr 1e-4 \
+    --fine_tune_mode head_only \
+    --pretrained_path data/pretrained/nicheformer_pretrained.ckpt \
+    --device cuda \
+    --use_amp
 ```
+
+**Note:** For CPU-only systems, use `--device cpu` and reduce `--batch_size` to 256.
 
 ---
 

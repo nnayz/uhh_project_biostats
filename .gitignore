@@ -13,21 +13,10 @@ env/
 ENV/
 venv/
 
-# Data files (too large for git)
-data/raw/*.h5ad
-data/processed/**/*.parquet
+# Data directory (all contents - too large for git)
+# Includes: raw data, processed data, pretrained models, client partitions
+data/
 
-# Pretrained model checkpoints (very large files - 500MB+)
-data/pretrained/**/*.ckpt
-data/pretrained/**/*.pt
-data/pretrained/**/*.pth
-data/pretrained/**/*.pkl
-
-# Outputs (keep structure, ignore contents)
-outputs/**/*
-!outputs/.gitkeep
-!outputs/milestone2/.gitkeep
-!outputs/milestone3/.gitkeep
 
 # Results (model checkpoints and large outputs)
 results/**/*model*.pt

@@ -233,6 +233,7 @@ def _run_final_evaluation(
     include_spatial: bool,
     device: torch.device,
     num_workers: int = 0,
+    use_amp: bool = False,
 ) -> Dict:
     """
     Run final evaluation of the global model on all clients' test sets.
@@ -276,7 +277,7 @@ def _run_final_evaluation(
             )
             
             print(f"\n{client_id} test ({len(test_df)} samples):")
-            metrics = evaluate(model, test_loader, device, verbose=True)
+            metrics = evaluate(model, test_loader, device, verbose=True, use_amp=use_amp)
             
             per_client_test[client_id] = {
                 "loss": float(metrics["loss"]),
@@ -349,8 +350,8 @@ def main() -> None:
     
     # Training hyperparameters
     parser.add_argument(
-        "--batch_size", type=int, default=256,
-        help="Batch size for training"
+        "--batch_size", type=int, default=1024,
+        help="Batch size for training (increased for GPU utilization)"
     )
     parser.add_argument(
         "--lr", type=float, default=1e-4,
@@ -391,8 +392,16 @@ def main() -> None:
         help="Random seed"
     )
     parser.add_argument(
-        "--num_workers", type=int, default=0,
-        help="Number of data loading workers"
+        "--num_workers", type=int, default=None,
+        help="Number of data loading workers (0=main thread, 4-8 recommended for GPU). Auto-set to 0 on Windows with Ray."
+    )
+    parser.add_argument(
+        "--use_amp", action="store_true", default=True,
+        help="Use Automatic Mixed Precision (AMP) for faster training"
+    )
+    parser.add_argument(
+        "--no_amp", action="store_true",
+        help="Disable AMP"
     )
     parser.add_argument(
         "--verbose", action="store_true", default=True,
@@ -408,6 +417,17 @@ def main() -> None:
     # Process arguments
     include_spatial = args.include_spatial and not args.no_spatial
     verbose = args.verbose and not args.quiet
+    
+    # Windows + Ray + multiprocessing DataLoader = incompatible
+    # Auto-set num_workers=0 on Windows when using Ray/Flower
+    import platform
+    if args.num_workers is None:
+        if platform.system() == 'Windows':
+            args.num_workers = 0
+            if verbose:
+                print("[INFO] Windows detected: Setting num_workers=0 (multiprocessing not compatible with Ray on Windows)")
+        else:
+            args.num_workers = 4  # Default for Linux/Mac
     
     # Set seeds
     torch.manual_seed(args.seed)
@@ -461,6 +481,11 @@ def main() -> None:
     initial_weights = state_dict_to_ndarrays(initial_model.get_weights())
     initial_parameters = ndarrays_to_parameters(initial_weights)
     
+    # Setup AMP for GPU training
+    use_amp = args.use_amp and not args.no_amp and device.type == 'cuda'
+    if use_amp:
+        print("Using Automatic Mixed Precision (AMP) for faster GPU training")
+    
     # Create client factory
     client_fn = create_client_fn(
         client_ids=clients,
@@ -475,6 +500,7 @@ def main() -> None:
         pretrained_path=args.pretrained_path,
         num_workers=args.num_workers,
         verbose=verbose,
+        use_amp=use_amp,
     )
     
     # Create FedAvg strategy with parameter saving
@@ -598,6 +624,7 @@ def main() -> None:
         include_spatial=include_spatial,
         device=device,
         num_workers=args.num_workers,
+        use_amp=use_amp,
     )
     
     # Save artifacts

@@ -166,7 +166,7 @@ scripts/
 | `--num_rounds` | Number of federated rounds | `5` |
 | `--clients_per_round` | Clients sampled per round | `2` |
 | `--local_epochs` | Local training epochs per round | `1` |
-| `--batch_size` | Training batch size | `256` |
+| `--batch_size` | Training batch size | `1024` (GPU optimized) |
 | `--lr` | Learning rate | `1e-4` |
 | `--weight_decay` | Weight decay | `1e-5` |
 | `--fine_tune_mode` | `head_only`, `partial`, or `full` | `head_only` |
@@ -174,6 +174,9 @@ scripts/
 | `--no_spatial` | Disable spatial coordinates | `False` |
 | `--pretrained_path` | Path to pretrained checkpoint | `None` |
 | `--device` | `cpu` or `cuda` | `cpu` |
+| `--num_workers` | Data loading workers (0=main thread, 4-8 for GPU) | `4` |
+| `--use_amp` | Enable Automatic Mixed Precision (GPU) | `True` |
+| `--no_amp` | Disable AMP | `False` |
 | `--seed` | Random seed | `42` |
 | `--verbose` / `--quiet` | Output verbosity | `verbose` |
 
@@ -190,11 +193,13 @@ python scripts/run_federated.py \
   --num_rounds 2 \
   --clients_per_round 2 \
   --local_epochs 1 \
-  --batch_size 256 \
-  --device cpu
+  --batch_size 1024 \
+  --device cuda \
+  --num_workers 4 \
+  --use_amp
 ```
 
-#### 2. Main Run (Full Federated Training)
+#### 2. Main Run (GPU Optimized)
 
 ```bash
 python scripts/run_federated.py \
@@ -203,13 +208,16 @@ python scripts/run_federated.py \
   --num_rounds 10 \
   --clients_per_round 3 \
   --local_epochs 2 \
-  --batch_size 256 \
+  --batch_size 1024 \
   --lr 1e-4 \
   --fine_tune_mode head_only \
-  --device cuda
+  --pretrained_path data/pretrained/nicheformer_pretrained.ckpt \
+  --device cuda \
+  --num_workers 4 \
+  --use_amp
 ```
 
-#### 3. With Pretrained Weights
+#### 3. With Pretrained Weights (GPU Optimized)
 
 ```bash
 python scripts/run_federated.py \
@@ -217,11 +225,27 @@ python scripts/run_federated.py \
   --output_dir results/federated_pretrained \
   --num_rounds 5 \
   --clients_per_round 3 \
-  --local_epochs 1 \
-  --batch_size 256 \
+  --local_epochs 2 \
+  --batch_size 1024 \
+  --lr 1e-4 \
+  --fine_tune_mode head_only \
   --pretrained_path data/pretrained/nicheformer_pretrained.ckpt \
-  --device cuda
+  --device cuda \
+  --num_workers 4 \
+  --use_amp
 ```
+
+**GPU Optimizations:**
+- `--batch_size 1024` - Increased for better GPU utilization (4x default)
+- `--num_workers 4` - Parallel data loading to prevent GPU starvation
+- `--use_amp` - Automatic Mixed Precision for ~2x speedup
+- Expected GPU utilization: 80-95%
+
+**For CPU-only systems:**
+- Use `--device cpu`
+- Reduce `--batch_size` to 256 or 128
+- Set `--num_workers 0` (or omit)
+- Use `--no_amp` (AMP is CUDA-only)
 
 ---
 
@@ -469,7 +493,21 @@ def fit(self, parameters, config):
    ```
    RuntimeError: CUDA out of memory
    ```
-   **Solution:** Reduce `--batch_size` or use `--device cpu`.
+   **Solution:** 
+   - Reduce `--batch_size` (try 512, 256, or 128)
+   - Disable AMP with `--no_amp` (uses more memory but slower)
+   - Reduce `--num_workers` to 2 or 0
+   - Use `--device cpu` as fallback
+
+5. **Low GPU Utilization**
+   ```
+   GPU usage: ~20% (expected: 80-95%)
+   ```
+   **Solution:**
+   - Increase `--batch_size` (if memory allows)
+   - Increase `--num_workers` to 6 or 8
+   - Ensure `--use_amp` is enabled
+   - Check for data loading bottlenecks
 
 ### Debug Mode
 

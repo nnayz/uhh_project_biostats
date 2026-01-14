@@ -109,6 +109,7 @@ class FlowerClient(fl.client.NumPyClient):
         pretrained_path: Optional[str] = None,
         num_workers: int = 0,
         verbose: bool = True,
+        use_amp: bool = False,
     ):
         """
         Initialize the Flower client.
@@ -139,6 +140,18 @@ class FlowerClient(fl.client.NumPyClient):
         self.pretrained_path = pretrained_path
         self.num_workers = num_workers
         self.verbose = verbose
+        self.use_amp = use_amp and self.device.type == 'cuda'
+        
+        # Setup AMP scaler if needed
+        if self.use_amp:
+            # Use new torch.amp API if available, else fallback to old API
+            if hasattr(torch.amp, 'GradScaler'):
+                self.scaler = torch.amp.GradScaler('cuda')
+            else:
+                from torch.cuda.amp import GradScaler
+                self.scaler = GradScaler()
+        else:
+            self.scaler = None
         
         # Load gene list and label map
         self.genes = load_gene_list(data_dir)
@@ -260,6 +273,8 @@ class FlowerClient(fl.client.NumPyClient):
                 optimizer,
                 self.device,
                 verbose=self.verbose,
+                use_amp=self.use_amp,
+                scaler=self.scaler,
             )
             total_loss += metrics["loss"]
             total_acc += metrics["accuracy"]
@@ -310,6 +325,7 @@ class FlowerClient(fl.client.NumPyClient):
             self.val_loader,
             self.device,
             verbose=self.verbose,
+            use_amp=self.use_amp,
         )
         
         # Return loss, num_examples, and metrics
@@ -336,6 +352,7 @@ def create_client_fn(
     pretrained_path: Optional[str] = None,
     num_workers: int = 0,
     verbose: bool = True,
+    use_amp: bool = False,
 ):
     """
     Create a client factory function for Flower simulation.
@@ -382,6 +399,7 @@ def create_client_fn(
             pretrained_path=pretrained_path,
             num_workers=num_workers,
             verbose=verbose,
+            use_amp=use_amp,
         )
     
     return client_fn

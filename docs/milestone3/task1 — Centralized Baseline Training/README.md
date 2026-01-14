@@ -162,13 +162,16 @@ The centralized training script manages the end-to-end workflow for non-federate
 | --- | --- | --- |
 | `--data_dir` | Directory containing Milestone 2 processed data | `data/processed` |
 | `--output_dir` | Directory to save results and artifacts | N/A |
-| `--device` | Compute device (`cpu` or `cuda`) | `cuda` |
-| `--epochs` | Number of training epochs | `5` |
-| `--batch_size` | Training batch size | `128` |
+| `--device` | Compute device (`cpu` or `cuda`) | `cpu` |
+| `--epochs` | Number of training epochs | `10` |
+| `--batch_size` | Training batch size | `1024` (GPU optimized) |
 | `--lr` | Learning rate | `1e-4` |
 | `--fine_tune_mode` | Strategy: `head_only`, `partial`, or `full` | `head_only` |
 | `--pretrained_path` | Path to the `.ckpt` file | `None` |
-| `--include_spatial` | Flag to include x,y coordinates | `False` |
+| `--include_spatial` | Flag to include x,y coordinates | `True` |
+| `--num_workers` | Data loading workers (0=main thread, 4-8 for GPU) | `4` |
+| `--use_amp` | Enable Automatic Mixed Precision (GPU) | `True` |
+| `--no_amp` | Disable AMP | `False` |
 
 ### Execution Commands
 
@@ -183,30 +186,46 @@ python scripts/run_centralized.py \
   --data_dir data/processed \
   --output_dir results/centralized_pretrained_smoke \
   --epochs 1 \
-  --batch_size 128 \
+  --batch_size 1024 \
   --lr 1e-4 \
   --fine_tune_mode head_only \
   --pretrained_path data/pretrained/nicheformer_pretrained.ckpt \
-  --device cuda
+  --device cuda \
+  --num_workers 4 \
+  --use_amp
 
 ```
 
-#### 2. Main Run (Pretrained + Partial Fine-tuning)
+#### 2. Main Run (GPU Optimized)
 
-The recommended configuration for actual training results.
+The recommended configuration for actual training with GPU optimizations.
 
 ```bash
 python scripts/run_centralized.py \
   --data_dir data/processed \
   --output_dir results/centralized \
-  --epochs 5 \
-  --batch_size 128 \
+  --epochs 10 \
+  --batch_size 1024 \
   --lr 1e-4 \
-  --fine_tune_mode full \
+  --fine_tune_mode head_only \
   --pretrained_path data/pretrained/nicheformer_pretrained.ckpt \
-  --device cuda
+  --device cuda \
+  --num_workers 4 \
+  --use_amp
 
 ```
+
+**GPU Optimizations:**
+- `--batch_size 1024` - Increased for better GPU utilization (4x default)
+- `--num_workers 4` - Parallel data loading to prevent GPU starvation
+- `--use_amp` - Automatic Mixed Precision for ~2x speedup
+- Expected GPU utilization: 80-95%
+
+**For CPU-only systems:**
+- Use `--device cpu`
+- Reduce `--batch_size` to 256 or 128
+- Set `--num_workers 0` (or omit)
+- Use `--no_amp` (AMP is CUDA-only)
 
 ---
 

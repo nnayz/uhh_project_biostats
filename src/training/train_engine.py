@@ -17,13 +17,29 @@ import json
 import os
 from pathlib import Path
 
+import sys
+
+# Use new torch.amp API (PyTorch 2.0+) or fallback to old API
+try:
+    if hasattr(torch.amp, 'GradScaler'):
+        # New API (PyTorch 2.0+)
+        GradScaler = lambda: torch.amp.GradScaler('cuda')
+    else:
+        # Old API (PyTorch < 2.0)
+        from torch.cuda.amp import GradScaler
+except (ImportError, AttributeError):
+    # Fallback for older PyTorch versions
+    GradScaler = None
+
 
 def train_one_epoch(
     model: nn.Module,
     dataloader: DataLoader,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    verbose: bool = True
+    verbose: bool = True,
+    use_amp: bool = False,
+    scaler: Optional[GradScaler] = None
 ) -> Dict[str, float]:
     """
     Train the model for one epoch.
@@ -38,6 +54,8 @@ def train_one_epoch(
         optimizer: Optimizer for parameter updates
         device: Device to run training on (cpu/cuda)
         verbose: Whether to print progress
+        use_amp: Whether to use Automatic Mixed Precision (AMP)
+        scaler: GradScaler for AMP (required if use_amp=True)
         
     Returns:
         Dictionary with metrics:
@@ -51,23 +69,39 @@ def train_one_epoch(
     all_labels = []
     num_batches = 0
     
+    is_cuda = device.type == 'cuda'
+    non_blocking = is_cuda  # Use non-blocking transfers for CUDA
+    
     for batch_idx, batch in enumerate(dataloader):
-        # Move batch to device
-        features = batch['features'].to(device)
-        labels = batch['label'].to(device)
+        # Move batch to device (non-blocking for CUDA)
+        features = batch['features'].to(device, non_blocking=non_blocking)
+        labels = batch['label'].to(device, non_blocking=non_blocking)
         
         batch_dict = {'features': features, 'label': labels}
         
-        # Forward pass
+        # Forward pass with AMP if enabled
         optimizer.zero_grad()
-        logits = model(batch_dict)
         
-        # Compute loss
-        loss = model.compute_loss(logits, labels)
-        
-        # Backward pass
-        loss.backward()
-        optimizer.step()
+        if use_amp and scaler is not None:
+            # Use new torch.amp API if available, else fallback to old API
+            if hasattr(torch.amp, 'autocast'):
+                with torch.amp.autocast('cuda'):
+                    logits = model(batch_dict)
+                    loss = model.compute_loss(logits, labels)
+            else:
+                with torch.cuda.amp.autocast():
+                    logits = model(batch_dict)
+                    loss = model.compute_loss(logits, labels)
+            
+            # Backward pass with AMP
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            logits = model(batch_dict)
+            loss = model.compute_loss(logits, labels)
+            loss.backward()
+            optimizer.step()
         
         # Accumulate metrics
         total_loss += loss.item()
@@ -95,7 +129,8 @@ def evaluate(
     model: nn.Module,
     dataloader: DataLoader,
     device: torch.device,
-    verbose: bool = True
+    verbose: bool = True,
+    use_amp: bool = False
 ) -> Dict[str, float]:
     """
     Evaluate the model on a dataset.
@@ -110,6 +145,7 @@ def evaluate(
         dataloader: Evaluation data loader
         device: Device to run evaluation on (cpu/cuda)
         verbose: Whether to print results
+        use_amp: Whether to use Automatic Mixed Precision (AMP)
         
     Returns:
         Dictionary with metrics:
@@ -123,19 +159,31 @@ def evaluate(
     all_labels = []
     num_batches = 0
     
+    is_cuda = device.type == 'cuda'
+    non_blocking = is_cuda  # Use non-blocking transfers for CUDA
+    
     with torch.no_grad():
         for batch in dataloader:
-            # Move batch to device
-            features = batch['features'].to(device)
-            labels = batch['label'].to(device)
+            # Move batch to device (non-blocking for CUDA)
+            features = batch['features'].to(device, non_blocking=non_blocking)
+            labels = batch['label'].to(device, non_blocking=non_blocking)
             
             batch_dict = {'features': features, 'label': labels}
             
-            # Forward pass
-            logits = model(batch_dict)
-            
-            # Compute loss
-            loss = model.compute_loss(logits, labels)
+            # Forward pass with AMP if enabled
+            if use_amp and is_cuda:
+                # Use new torch.amp API if available, else fallback to old API
+                if hasattr(torch.amp, 'autocast'):
+                    with torch.amp.autocast('cuda'):
+                        logits = model(batch_dict)
+                        loss = model.compute_loss(logits, labels)
+                else:
+                    with torch.cuda.amp.autocast():
+                        logits = model(batch_dict)
+                        loss = model.compute_loss(logits, labels)
+            else:
+                logits = model(batch_dict)
+                loss = model.compute_loss(logits, labels)
             
             # Accumulate metrics
             total_loss += loss.item()

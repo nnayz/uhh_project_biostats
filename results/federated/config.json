@@ -1,0 +1,23 @@
+{
+  "data_dir": "data/processed",
+  "output_dir": "results\\federated",
+  "num_rounds": 5,
+  "clients_per_round": 3,
+  "local_epochs": 2,
+  "batch_size": 1024,
+  "learning_rate": 0.0001,
+  "weight_decay": 1e-05,
+  "fine_tune_mode": "head_only",
+  "include_spatial": true,
+  "pretrained_path": "data/pretrained/nicheformer_pretrained.ckpt",
+  "device": "cuda",
+  "seed": 42,
+  "num_genes": 248,
+  "num_labels": 24,
+  "clients": [
+    "client_01",
+    "client_02",
+    "client_03"
+  ],
+  "num_clients": 3
+}
