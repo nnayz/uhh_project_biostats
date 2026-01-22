@@ -1,7 +1,13 @@
 {
   "global_test": {
-    "loss": 3.1650824264813493,
-    "accuracy": 0.044174041297935104,
-    "f1_macro": 0.029549964703467557,
-    "predictions": [
-      
+    "loss": 0.1886942678441604,
+    "accuracy": 0.9337863463969659,
+    "f1_macro": 0.9313581573240327,
+    "num_samples": 94920
+  },
+  "clients": [
+    "client_01",
+    "client_02",
+    "client_03"
+  ]
+}
