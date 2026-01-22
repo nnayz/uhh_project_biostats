@@ -63,6 +63,7 @@ python scripts/client_stats.py
 - `md/figures/per_client_label_distribution.png`
 - `md/figures/client_imbalance_max_fraction.png`
 - `md/figures/client_jsd_to_global.png`
+- `diagnostics/figures/batch_correction_umap_and_accuracy.png`
 
 ## Traceability
 - Data contract: `md/data_dictionary.md`

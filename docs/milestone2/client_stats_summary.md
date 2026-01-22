@@ -123,3 +123,31 @@ Detailed tables are available in:
 ## Conclusion
 
 The client diagnostics confirm that the data preparation and federated partitioning steps were successful. The resulting federated dataset is clean, reproducible, and ready for federated model training and evaluation in Milestone 3.
+
+---
+
+## Batch Correction UMAP + Accuracy (Presentation Figure)
+
+UMAP colored by client (batch) and cell type before/after batch correction; shows client heterogeneity and correction effectiveness. Bottom panel compares centralized vs federated accuracy on the global test set (and SMPC variant if present in `results/`).
+
+Figure:
+- `diagnostics/figures/batch_correction_umap_and_accuracy.png`
+
+![Batch correction UMAP + accuracy](../../diagnostics/figures/batch_correction_umap_and_accuracy.png)
+
+How to generate:
+```bash
+python scripts/generate_presentation_batch_celltype_figure.py \
+  --data_path data/processed \
+  --out_path diagnostics/figures/batch_correction_umap_and_accuracy.png \
+  --seed 42 \
+  --max_points 200000
+```
+
+Optional overrides (if your keys differ):
+```bash
+python scripts/generate_presentation_batch_celltype_figure.py \
+  --data_path data/processed \
+  --batch_key client_id \
+  --celltype_key label
+```
