@@ -258,6 +258,24 @@ md_lines.append(
          "entropy", "js_divergence_to_global"]
     ].to_markdown(index=False)
 )
+md_lines.append("\n\n")
+md_lines.append("## Batch correction UMAP + accuracy (presentation)\n")
+md_lines.append(
+    "UMAP colored by client (batch) and cell type before/after batch correction. "
+    "Train embedding uses pooled client train+val; test embedding uses the global test set. "
+    "Bottom panel compares centralized vs federated accuracy on the global test set.\n\n"
+)
+md_lines.append("- `diagnostics/figures/batch_correction_umap_and_accuracy_train.png`\n")
+md_lines.append("- `diagnostics/figures/batch_correction_umap_and_accuracy_test.png`\n")
+md_lines.append("- `diagnostics/figures/batch_correction_umap_and_accuracy.png` (alias of test)\n\n")
+md_lines.append("How to generate:\n")
+md_lines.append("```bash\n")
+md_lines.append("python scripts/generate_presentation_batch_celltype_figure.py \\\n")
+md_lines.append("  --data_path data/processed \\\n")
+md_lines.append("  --split both \\\n")
+md_lines.append("  --seed 42 \\\n")
+md_lines.append("  --max_points 200000\n")
+md_lines.append("```\n")
 
 with open(SUMMARY_MD, "w", encoding="utf-8") as f:
     f.write("\n".join(md_lines))

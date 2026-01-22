@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -133,6 +134,68 @@ def _load_parquet_sample(
     return pd.concat(parts, ignore_index=True).reset_index(drop=True)
 
 
+def _load_multi_parquet_sample(
+    parquet_paths: List[Path],
+    *,
+    columns: Optional[List[str]],
+    max_rows: int,
+    seed: int,
+) -> pd.DataFrame:
+    if not parquet_paths:
+        raise ValueError("No parquet files provided for multi-parquet sampling.")
+    if max_rows <= 0:
+        raise ValueError("--max_points must be > 0")
+
+    rng = np.random.default_rng(seed)
+    paths = list(parquet_paths)
+    rng.shuffle(paths)
+
+    try:
+        import pyarrow.parquet as pq
+    except Exception:
+        _log("[WARNING] pyarrow.parquet not available; reading full parquets into memory.")
+        frames = [pd.read_parquet(p, columns=columns) for p in paths]
+        df = pd.concat(frames, ignore_index=True)
+        if len(df) > max_rows:
+            df = df.sample(n=max_rows, random_state=seed)
+        return df.reset_index(drop=True)
+
+    remaining = max_rows
+    parts: List[pd.DataFrame] = []
+
+    for p in paths:
+        if remaining <= 0:
+            break
+
+        pf = pq.ParquetFile(p)
+        row_groups = list(range(pf.num_row_groups))
+        rng.shuffle(row_groups)
+
+        for rg in row_groups:
+            if remaining <= 0:
+                break
+            df_rg = pf.read_row_group(rg, columns=columns).to_pandas()
+            if len(df_rg) > remaining:
+                df_rg = df_rg.sample(n=remaining, random_state=seed)
+            parts.append(df_rg)
+            remaining -= len(df_rg)
+
+    if not parts:
+        return pq.ParquetFile(paths[0]).read(columns=columns).to_pandas().head(max_rows).reset_index(drop=True)
+
+    return pd.concat(parts, ignore_index=True).reset_index(drop=True)
+
+
+def _list_client_train_val_parquets(data_dir: Path) -> List[Path]:
+    clients_dir = data_dir / "clients"
+    if not clients_dir.exists():
+        return []
+
+    train_files = sorted(clients_dir.glob("client_*/train.parquet"))
+    val_files = sorted(clients_dir.glob("client_*/val.parquet"))
+    return train_files + val_files
+
+
 def _find_preprocessed_parquet(data_path: Path) -> Tuple[Path, str]:
     """
     Resolve a directory containing preprocessed artifacts to a concrete parquet file.
@@ -163,13 +226,15 @@ def _find_preprocessed_parquet(data_path: Path) -> Tuple[Path, str]:
 def _load_adata_from_preprocessed_dir(
     data_dir: Path,
     *,
+    split: str,
     max_points: int,
     seed: int,
-) -> "anndata.AnnData":
+) -> Tuple["anndata.AnnData", str]:
     import anndata as ad
 
-    parquet_path, desc = _find_preprocessed_parquet(data_dir)
-    _log(f"Using preprocessed data: {desc} ({parquet_path})")
+    split = split.lower()
+    if split not in {"train", "test"}:
+        raise ValueError(f"Invalid split for preprocessed dir: {split} (expected train/test)")
 
     genes_path = data_dir / "genes.txt"
     gene_cols: Optional[List[str]] = None
@@ -183,23 +248,23 @@ def _load_adata_from_preprocessed_dir(
     if gene_cols is not None:
         columns = meta_candidates + gene_cols
 
-    df = _load_parquet_sample(parquet_path, columns=columns, max_rows=max_points, seed=seed)
-
-    # If we used a single client parquet fallback, pool all available client parquets.
-    if parquet_path.parent.name.startswith("client_") and parquet_path.parts[-3:-2] == ("clients",):
-        _log("[INFO] Pooling all client parquet files for plotting (train/val only).")
-        client_parquets = sorted((data_dir / "clients").glob("client_*/*.parquet"))
-        frames = []
-        for p in client_parquets:
-            try:
-                frames.append(pd.read_parquet(p, columns=columns))
-            except Exception as e:
-                _log(f"[WARNING] Skipping {p} ({type(e).__name__}: {e})")
-        if not frames:
-            raise RuntimeError("Found clients/ but could not read any parquet files.")
-        df = pd.concat(frames, ignore_index=True)
-        if len(df) > max_points:
-            df = df.sample(n=max_points, random_state=seed).reset_index(drop=True)
+    if split == "test":
+        parquet_path = data_dir / "global" / "test.parquet"
+        if not parquet_path.exists():
+            raise FileNotFoundError(f"Global test parquet not found: {parquet_path}")
+        source_desc = f"Global test set ({parquet_path})"
+        _log(f"Using preprocessed data: {source_desc}")
+        df = _load_parquet_sample(parquet_path, columns=columns, max_rows=max_points, seed=seed)
+    else:
+        client_parquets = _list_client_train_val_parquets(data_dir)
+        if not client_parquets:
+            raise FileNotFoundError(
+                f"No client train/val parquets found under {data_dir/'clients'}. "
+                "Expected clients/client_*/train.parquet and val.parquet."
+            )
+        source_desc = f"Client train+val pool ({len(client_parquets)} parquet files under {data_dir/'clients'})"
+        _log(f"Using preprocessed data: {source_desc}")
+        df = _load_multi_parquet_sample(client_parquets, columns=columns, max_rows=max_points, seed=seed)
 
     if gene_cols is None:
         # Infer gene columns by exclusion
@@ -227,12 +292,18 @@ def _load_adata_from_preprocessed_dir(
     if "id" in adata.obs.columns:
         adata.obs_names = adata.obs["id"].astype(str).values
 
-    return adata
+    return adata, source_desc
 
 
-def _load_adata(data_path: Path, *, max_points: int, seed: int) -> "anndata.AnnData":
+def _load_adata(
+    data_path: Path,
+    *,
+    split: str,
+    max_points: int,
+    seed: int,
+) -> Tuple["anndata.AnnData", str]:
     if data_path.is_dir():
-        return _load_adata_from_preprocessed_dir(data_path, max_points=max_points, seed=seed)
+        return _load_adata_from_preprocessed_dir(data_path, split=split, max_points=max_points, seed=seed)
 
     if data_path.suffix.lower() in {".h5ad"}:
         import scanpy as sc
@@ -255,16 +326,41 @@ def _load_adata(data_path: Path, *, max_points: int, seed: int) -> "anndata.AnnD
             if getattr(adata, "X", None) is None:
                 raise RuntimeError("Backed subset .to_memory() returned X=None")
             _log(f"Subsampled to n_obs={adata.n_obs:,} for plotting/computation")
-            return adata
         except Exception as e:
             _log(f"[INFO] Backed subset load failed ({type(e).__name__}: {e}); falling back to in-memory read.")
 
-        adata = sc.read_h5ad(str(data_path))
-        _log(f"Loaded (in-memory): n_obs={adata.n_obs:,}, n_vars={adata.n_vars:,}")
-        if adata.n_obs > max_points:
-            adata = adata[idx].copy()
-            _log(f"Subsampled to n_obs={adata.n_obs:,} for plotting/computation")
-        return adata
+            adata = sc.read_h5ad(str(data_path))
+            _log(f"Loaded (in-memory): n_obs={adata.n_obs:,}, n_vars={adata.n_vars:,}")
+            if adata.n_obs > max_points:
+                adata = adata[idx].copy()
+                _log(f"Subsampled to n_obs={adata.n_obs:,} for plotting/computation")
+
+        source_desc = f"h5ad subsample (n={adata.n_obs:,})"
+
+        # Optional split for h5ad: best-effort using an existing split column if present.
+        split = split.lower()
+        if split in {"train", "test"}:
+            split_col = None
+            for cand in ("nicheformer_split", "split", "set"):
+                if cand in adata.obs.columns:
+                    split_col = cand
+                    break
+            if split_col is None:
+                _log("[INFO] No split column found in h5ad obs; using full subsample for embedding.")
+            else:
+                s = adata.obs[split_col].astype(str).str.lower()
+                if split == "train":
+                    mask = s.isin({"train", "val", "valid", "validation"})
+                else:
+                    mask = s.isin({"test"})
+                if int(mask.sum()) >= 2:
+                    adata = adata[mask].copy()
+                    source_desc = f"h5ad {split} subset via obs['{split_col}'] (n={adata.n_obs:,})"
+                    _log(f"[INFO] Using {split} subset from h5ad via obs['{split_col}']")
+                else:
+                    _log(f"[INFO] h5ad split '{split}' produced too few rows; using full subsample for embedding.")
+
+        return adata, source_desc
 
     raise ValueError(f"Unsupported --data_path: {data_path} (expected a directory or .h5ad file)")
 
@@ -649,7 +745,14 @@ def main() -> None:
         "--out_path",
         type=str,
         default="diagnostics/figures/batch_correction_umap_and_accuracy.png",
-        help="Output path for the composite figure",
+        help="Base output path for the composite figure (split suffixes are added automatically)",
+    )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="both",
+        choices=["train", "test", "both"],
+        help="Which dataset split(s) to embed: train uses pooled client train+val; test uses global test parquet",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max_points", type=int, default=200000)
@@ -659,8 +762,13 @@ def main() -> None:
 
     _set_global_seed(args.seed)
 
-    out_path = (PROJECT_ROOT / args.out_path).resolve()
-    out_dir = out_path.parent
+    base_out_path = (PROJECT_ROOT / args.out_path).resolve()
+    base_stem = base_out_path.stem
+    for suf in ("_train", "_test"):
+        if base_stem.endswith(suf):
+            base_stem = base_stem[: -len(suf)]
+    base_out_path = base_out_path.with_name(base_stem + base_out_path.suffix)
+    out_dir = base_out_path.parent
     _safe_mkdir(out_dir)
 
     # Help scanpy/numba work in environments where site-packages is not writable.
@@ -703,190 +811,270 @@ def main() -> None:
         if isinstance(gm, dict) and "global_test_size" in gm:
             _log(f"Global metadata: global_test_size={gm.get('global_test_size')} | num_clients={gm.get('num_clients')}")
 
-    adata = _load_adata(data_path, max_points=args.max_points, seed=args.seed)
-    _log(f"Loaded data for plotting: n_obs={adata.n_obs:,}, n_vars={adata.n_vars:,}")
+    requested_split = args.split.lower()
+    splits = ["train", "test"] if requested_split == "both" else [requested_split]
+    _log(f"Generating figures for split(s): {', '.join(splits)}")
 
-    batch_key = _infer_obs_key(
-        adata.obs.columns,
-        ["client", "client_id", "batch", "site", "donor", "sample_id", "library_key"],
-        override=args.batch_key,
-        label="batch_key",
-    )
-    celltype_key = _infer_obs_key(
-        adata.obs.columns,
-        ["cell_type", "celltype", "label", "y", "annotation", "cluster"],
-        override=args.celltype_key,
-        label="celltype_key",
-    )
-
-    _log(f"Using batch_key: {batch_key}")
-    _log(f"Using celltype_key: {celltype_key}")
-
-    # Normalize categories for plotting (and optionally group into "Other")
-    batch_series = adata.obs[batch_key].astype(str)
-    cell_series = adata.obs[celltype_key]
-    if pd.api.types.is_numeric_dtype(cell_series):
-        cell_series = cell_series.astype(int).astype(str).radd("L")
-    else:
-        cell_series = cell_series.astype(str)
-
-    cell_series, kept = _category_with_optional_other(cell_series, max_categories=25)
-    if kept is not None:
-        _log(f"[INFO] Too many cell types; keeping top {len(kept) - 1} by frequency + 'Other'.")
-
-    batch_counts = batch_series.value_counts()
-    _log(f"Batches: {int(batch_counts.size)} | counts={batch_counts.to_dict()}")
-    cell_counts = cell_series.value_counts()
-    _log(f"Cell types: {int(cell_counts.size)} | top10={cell_counts.head(10).to_dict()}")
-
-    # UMAP computation (separate graphs; corrected must not reuse uncorrected neighbors)
-    max_allowed_pcs = min(int(adata.n_obs), int(adata.n_vars)) - 1
-    if max_allowed_pcs < 2:
-        raise ValueError(f"Not enough data for PCA/UMAP (n_obs={adata.n_obs}, n_vars={adata.n_vars}).")
-    n_pcs = int(min(30, max_allowed_pcs))
-    _log(f"UMAP settings: n_pcs={n_pcs}, max_points={args.max_points}, seed={args.seed}")
-
-    adata_unc = _compute_umap_uncorrected(adata, seed=args.seed, n_pcs=n_pcs)
-    adata_cor, correction_method = _compute_umap_corrected(
-        adata, batch_key=batch_key, seed=args.seed, n_pcs=n_pcs
-    )
-    _log(f"Batch correction method used: {correction_method}")
-
-    # Build composite figure: 2x2 UMAP grid + bottom accuracy panel
-    fig = plt.figure(figsize=(18, 14))
-    gs = fig.add_gridspec(nrows=3, ncols=2, height_ratios=[1.0, 1.0, 0.6], hspace=0.18, wspace=0.08)
-
-    ax_ub = fig.add_subplot(gs[0, 0])
-    ax_uc = fig.add_subplot(gs[1, 0])
-    ax_cb = fig.add_subplot(gs[0, 1])
-    ax_cc = fig.add_subplot(gs[1, 1])
-    ax_acc = fig.add_subplot(gs[2, :])
-
-    handles_batch, labels_batch = _scatter_umap(
-        ax_ub,
-        np.asarray(adata_unc.obsm["X_umap"]),
-        batch_series,
-        title="a. Uncorrected",
-        point_size=2.0,
-    )
-    handles_cell, labels_cell = _scatter_umap(
-        ax_uc,
-        np.asarray(adata_unc.obsm["X_umap"]),
-        cell_series,
-        title=None,
-        point_size=2.0,
-    )
-
-    _scatter_umap(
-        ax_cb,
-        np.asarray(adata_cor.obsm["X_umap"]),
-        batch_series,
-        title="b. Corrected",
-        point_size=2.0,
-    )
-    _scatter_umap(
-        ax_cc,
-        np.asarray(adata_cor.obsm["X_umap"]),
-        cell_series,
-        title=None,
-        point_size=2.0,
-    )
-
-    # Row labels (left side), like the reference layout
-    fig.text(0.015, 0.78, "Batch", rotation=90, va="center", ha="left", fontsize=14)
-    fig.text(0.015, 0.48, "Cell type", rotation=90, va="center", ha="left", fontsize=14)
-
-    # Accuracy panel (d)
     cent_acc, fed_acc, smpc_acc, clients, client_acc = _load_accuracy_data(PROJECT_ROOT)
 
-    client_order = clients if clients else sorted(client_acc.keys())
+    def _split_paths(split_name: str) -> Tuple[Path, Path, Path]:
+        composite = base_out_path.with_name(f"{base_out_path.stem}_{split_name}{base_out_path.suffix}")
+        umap_unc = out_dir / f"umap_uncorrected_{split_name}.png"
+        umap_cor = out_dir / f"umap_corrected_{split_name}.png"
+        return composite, umap_unc, umap_cor
 
-    if client_order:
-        x = np.arange(len(client_order))
-        ax_acc.set_xticks(x)
-        ax_acc.set_xticklabels([c.replace("client_", "Client ") for c in client_order], rotation=0)
-        ax_acc.set_xlim(-0.5, len(client_order) - 0.5)
-    else:
-        ax_acc.set_xticks([])
-        ax_acc.set_xlim(0, 1)
+    for split_name in splits:
+        split_title = "Train set (client train+val)" if split_name == "train" else "Global test set"
+        out_composite, umap_unc_path, umap_cor_path = _split_paths(split_name)
 
-    if client_acc and client_order:
-        xs: List[float] = []
-        ys: List[float] = []
-        for i, c in enumerate(client_order):
-            if c in client_acc:
-                xs.append(float(i))
-                ys.append(float(client_acc[c]))
-        if xs:
-            ax_acc.scatter(
-                xs,
-                ys,
-                s=60,
-                color="#2ca02c",
-                edgecolor="white",
-                linewidth=0.6,
-                zorder=5,
-                label="Clients (per-client)",
+        adata, data_desc = _load_adata(
+            data_path, split=split_name, max_points=args.max_points, seed=args.seed
+        )
+        _log(f"[{split_name}] Loaded data: n_obs={adata.n_obs:,}, n_vars={adata.n_vars:,}")
+
+        batch_key = _infer_obs_key(
+            adata.obs.columns,
+            ["client", "client_id", "batch", "site", "donor", "sample_id", "library_key"],
+            override=args.batch_key,
+            label="batch_key",
+        )
+        celltype_key = _infer_obs_key(
+            adata.obs.columns,
+            ["cell_type", "celltype", "label", "y", "annotation", "cluster"],
+            override=args.celltype_key,
+            label="celltype_key",
+        )
+
+        _log(f"[{split_name}] Using batch_key: {batch_key}")
+        _log(f"[{split_name}] Using celltype_key: {celltype_key}")
+
+        # Normalize categories for plotting (and optionally group into "Other")
+        batch_series = adata.obs[batch_key].astype(str)
+        if batch_key == "client_id" and "sample_id" in adata.obs.columns:
+            mapping_df = (
+                adata.obs[["client_id", "sample_id"]]
+                .dropna()
+                .astype(str)
+                .drop_duplicates()
+            )
+            if not mapping_df.empty and int(mapping_df.groupby("client_id")["sample_id"].nunique().max()) == 1:
+                mapping = dict(zip(mapping_df["client_id"], mapping_df["sample_id"]))
+                batch_series = batch_series.map(lambda c: f"{c} ({mapping.get(c)})" if c in mapping else c)
+
+        cell_series = adata.obs[celltype_key]
+        if pd.api.types.is_numeric_dtype(cell_series):
+            cell_series = cell_series.astype(int).astype(str).radd("L")
+        else:
+            cell_series = cell_series.astype(str)
+
+        cell_series, kept = _category_with_optional_other(cell_series, max_categories=25)
+        if kept is not None:
+            _log(f"[{split_name}] [INFO] Too many cell types; keeping top {len(kept) - 1} by frequency + 'Other'.")
+
+        batch_counts = batch_series.value_counts()
+        _log(f"[{split_name}] Batches: {int(batch_counts.size)} | counts={batch_counts.to_dict()}")
+        cell_counts = cell_series.value_counts()
+        _log(f"[{split_name}] Cell types: {int(cell_counts.size)} | top10={cell_counts.head(10).to_dict()}")
+
+        # UMAP computation (separate graphs; corrected must not reuse uncorrected neighbors)
+        max_allowed_pcs = min(int(adata.n_obs), int(adata.n_vars)) - 1
+        if max_allowed_pcs < 2:
+            raise ValueError(f"Not enough data for PCA/UMAP (n_obs={adata.n_obs}, n_vars={adata.n_vars}).")
+        n_pcs = int(min(30, max_allowed_pcs))
+        _log(f"[{split_name}] UMAP settings: n_pcs={n_pcs}, max_points={args.max_points}, seed={args.seed}")
+
+        adata_unc = _compute_umap_uncorrected(adata, seed=args.seed, n_pcs=n_pcs)
+        adata_cor, correction_method = _compute_umap_corrected(
+            adata, batch_key=batch_key, seed=args.seed, n_pcs=n_pcs
+        )
+        _log(f"[{split_name}] Batch correction method used: {correction_method}")
+
+        # Build composite figure: 2x2 UMAP grid + bottom accuracy panel
+        fig = plt.figure(figsize=(20, 14))
+        gs = fig.add_gridspec(
+            nrows=3, ncols=2, height_ratios=[1.0, 1.0, 0.6], hspace=0.18, wspace=0.08
+        )
+
+        ax_ub = fig.add_subplot(gs[0, 0])
+        ax_uc = fig.add_subplot(gs[1, 0])
+        ax_cb = fig.add_subplot(gs[0, 1])
+        ax_cc = fig.add_subplot(gs[1, 1])
+        ax_acc = fig.add_subplot(gs[2, :])
+
+        handles_batch, labels_batch = _scatter_umap(
+            ax_ub,
+            np.asarray(adata_unc.obsm["X_umap"]),
+            batch_series,
+            title="a. Uncorrected",
+            point_size=2.0,
+        )
+        handles_cell, labels_cell = _scatter_umap(
+            ax_uc,
+            np.asarray(adata_unc.obsm["X_umap"]),
+            cell_series,
+            title=None,
+            point_size=2.0,
+        )
+
+        _scatter_umap(
+            ax_cb,
+            np.asarray(adata_cor.obsm["X_umap"]),
+            batch_series,
+            title=f"b. Corrected ({correction_method})",
+            point_size=2.0,
+        )
+        _scatter_umap(
+            ax_cc,
+            np.asarray(adata_cor.obsm["X_umap"]),
+            cell_series,
+            title=None,
+            point_size=2.0,
+        )
+
+        fig.suptitle(f"{split_title}: UMAP before/after batch correction", fontsize=18, y=0.995)
+        fig.text(
+            0.5,
+            0.965,
+            f"{data_desc} | n={adata.n_obs:,} (subsample) | batch={batch_key} | celltype={celltype_key}",
+            ha="center",
+            fontsize=11,
+        )
+
+        # Row labels (left side)
+        fig.text(0.015, 0.78, "Batch (color)", rotation=90, va="center", ha="left", fontsize=14)
+        fig.text(0.015, 0.48, "Cell type (color)", rotation=90, va="center", ha="left", fontsize=14)
+
+        # Accuracy panel (always global test results from results/)
+        client_order = clients if clients else sorted(client_acc.keys())
+        if client_order:
+            x = np.arange(len(client_order))
+            ax_acc.set_xticks(x)
+            ax_acc.set_xticklabels([c.replace("client_", "Client ") for c in client_order], rotation=0)
+            ax_acc.set_xlim(-0.5, len(client_order) - 0.5)
+            ax_acc.set_xlabel("Client")
+        else:
+            ax_acc.set_xticks([])
+            ax_acc.set_xlim(0, 1)
+
+        if client_acc and client_order:
+            xs: List[float] = []
+            ys: List[float] = []
+            for i, c in enumerate(client_order):
+                if c in client_acc:
+                    xs.append(float(i))
+                    ys.append(float(client_acc[c]))
+            if xs:
+                ax_acc.scatter(
+                    xs,
+                    ys,
+                    s=60,
+                    color="#2ca02c",
+                    edgecolor="white",
+                    linewidth=0.6,
+                    zorder=5,
+                    label="Clients (per-client)",
+                )
+
+        if cent_acc is not None:
+            ax_acc.axhline(
+                cent_acc,
+                linestyle="--",
+                color="black",
+                linewidth=2,
+                label=f"Centralized (global test) = {cent_acc:.3f}",
+            )
+        if fed_acc is not None:
+            ax_acc.axhline(
+                fed_acc,
+                linestyle="-",
+                color="#1f77b4",
+                linewidth=2,
+                label=f"Federated (global test) = {fed_acc:.3f}",
+            )
+        if smpc_acc is not None:
+            ax_acc.axhline(
+                smpc_acc,
+                linestyle="-",
+                color="#ff7f0e",
+                linewidth=2,
+                label=f"Federated+SMPC (global test) = {smpc_acc:.3f}",
             )
 
-    if cent_acc is not None:
-        ax_acc.axhline(cent_acc, linestyle="--", color="black", linewidth=2, label="Centralized (global test)")
-    if fed_acc is not None:
-        ax_acc.axhline(fed_acc, linestyle="-", color="#1f77b4", linewidth=2, label="Federated (global test)")
-    if smpc_acc is not None:
-        ax_acc.axhline(smpc_acc, linestyle="-", color="#ff7f0e", linewidth=2, label="Federated+SMPC (global test)")
+        ax_acc.set_title("d. Accuracy (global test)", fontsize=14, pad=8)
+        ax_acc.set_ylabel("Accuracy")
+        ax_acc.grid(True, axis="y", alpha=0.25)
+        ax_acc.legend(loc="lower right", frameon=False)
 
-    ax_acc.set_title("d. Accuracy", fontsize=14, pad=8)
-    ax_acc.set_ylabel("Accuracy")
-    ax_acc.grid(True, axis="y", alpha=0.25)
-    ax_acc.legend(loc="lower right", frameon=False)
+        # Legends (right side)
+        fig.legend(
+            handles_batch,
+            labels_batch,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 0.88),
+            title=f"Batch ({batch_key})",
+            frameon=False,
+        )
+        fig.legend(
+            handles_cell,
+            labels_cell,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 0.52),
+            title=f"Cell type ({celltype_key})",
+            ncol=(1 if len(labels_cell) <= 20 else 2),
+            prop={"size": 9},
+            frameon=False,
+        )
 
-    # Legends to the right, outside plot area
-    fig.legend(
-        handles_batch,
-        labels_batch,
-        loc="upper left",
-        bbox_to_anchor=(0.83, 0.88),
-        title="Batch",
-        frameon=False,
-    )
-    fig.legend(
-        handles_cell,
-        labels_cell,
-        loc="upper left",
-        bbox_to_anchor=(0.83, 0.52),
-        title="Cell type",
-        ncol=(1 if len(labels_cell) <= 20 else 2),
-        prop={"size": 9},
-        frameon=False,
-    )
+        fig.subplots_adjust(left=0.05, right=0.80, top=0.94, bottom=0.07)
+        fig.savefig(out_composite, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        _log(f"[{split_name}] Saved composite figure to: {out_composite}")
 
-    fig.subplots_adjust(left=0.05, right=0.82, top=0.96, bottom=0.07)
-    fig.savefig(out_path, dpi=300)
-    plt.close(fig)
-    _log(f"Saved composite figure to: {out_path}")
+        def _save_single(umap_xy: np.ndarray, title: str, outp: Path) -> None:
+            f = plt.figure(figsize=(12, 10))
+            g = f.add_gridspec(nrows=2, ncols=1, hspace=0.08)
+            a1 = f.add_subplot(g[0, 0])
+            a2 = f.add_subplot(g[1, 0])
+            h_b, l_b = _scatter_umap(a1, umap_xy, batch_series, title=title, point_size=2.0)
+            h_c, l_c = _scatter_umap(a2, umap_xy, cell_series, title=None, point_size=2.0)
+            f.text(0.02, 0.74, "Batch (color)", rotation=90, va="center", ha="left", fontsize=12)
+            f.text(0.02, 0.28, "Cell type (color)", rotation=90, va="center", ha="left", fontsize=12)
+            f.legend(h_b, l_b, loc="upper left", bbox_to_anchor=(1.02, 0.88), title=f"Batch ({batch_key})", frameon=False)
+            f.legend(
+                h_c,
+                l_c,
+                loc="upper left",
+                bbox_to_anchor=(1.02, 0.45),
+                title=f"Cell type ({celltype_key})",
+                ncol=(1 if len(l_c) <= 20 else 2),
+                prop={"size": 9},
+                frameon=False,
+            )
+            f.suptitle(title, fontsize=16, y=0.99)
+            f.subplots_adjust(left=0.08, right=0.75, top=0.93, bottom=0.06)
+            f.savefig(outp, dpi=300, bbox_inches="tight")
+            plt.close(f)
 
-    # Optional individual UMAP outputs
-    umap_unc_path = out_dir / "umap_uncorrected.png"
-    umap_cor_path = out_dir / "umap_corrected.png"
+        _save_single(
+            np.asarray(adata_unc.obsm["X_umap"]),
+            f"{split_title} - Uncorrected UMAP",
+            umap_unc_path,
+        )
+        _save_single(
+            np.asarray(adata_cor.obsm["X_umap"]),
+            f"{split_title} - Corrected UMAP ({correction_method})",
+            umap_cor_path,
+        )
+        _log(f"[{split_name}] Saved: {umap_unc_path}")
+        _log(f"[{split_name}] Saved: {umap_cor_path}")
 
-    def _save_single(umap_xy: np.ndarray, title: str, outp: Path) -> None:
-        f = plt.figure(figsize=(10, 10))
-        g = f.add_gridspec(nrows=2, ncols=1, hspace=0.08)
-        a1 = f.add_subplot(g[0, 0])
-        a2 = f.add_subplot(g[1, 0])
-        _scatter_umap(a1, umap_xy, batch_series, title=title, point_size=2.0)
-        _scatter_umap(a2, umap_xy, cell_series, title=None, point_size=2.0)
-        f.text(0.02, 0.74, "Batch", rotation=90, va="center", ha="left", fontsize=12)
-        f.text(0.02, 0.28, "Cell type", rotation=90, va="center", ha="left", fontsize=12)
-        f.subplots_adjust(left=0.08, right=0.98, top=0.96, bottom=0.06)
-        f.savefig(outp, dpi=300)
-        plt.close(f)
-
-    _save_single(np.asarray(adata_unc.obsm["X_umap"]), "Uncorrected UMAP", umap_unc_path)
-    _save_single(np.asarray(adata_cor.obsm["X_umap"]), "Corrected UMAP", umap_cor_path)
-    _log(f"Saved: {umap_unc_path}")
-    _log(f"Saved: {umap_cor_path}")
+        # Backwards-compatible alias: base_out_path points to the test figure
+        if split_name == "test":
+            try:
+                shutil.copyfile(out_composite, base_out_path)
+                _log(f"[{split_name}] Also wrote alias: {base_out_path}")
+            except Exception as e:
+                _log(f"[WARNING] Could not write alias {base_out_path} ({type(e).__name__}: {e})")
 
 
 if __name__ == "__main__":

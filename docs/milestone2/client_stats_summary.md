@@ -130,16 +130,25 @@ The client diagnostics confirm that the data preparation and federated partition
 
 UMAP colored by client (batch) and cell type before/after batch correction; shows client heterogeneity and correction effectiveness. Bottom panel compares centralized vs federated accuracy on the global test set (and SMPC variant if present in `results/`).
 
-Figure:
-- `diagnostics/figures/batch_correction_umap_and_accuracy.png`
+Figures:
+- `diagnostics/figures/batch_correction_umap_and_accuracy_train.png`
+- `diagnostics/figures/batch_correction_umap_and_accuracy_test.png`
+- `diagnostics/figures/batch_correction_umap_and_accuracy.png` (alias of test)
 
-![Batch correction UMAP + accuracy](../../diagnostics/figures/batch_correction_umap_and_accuracy.png)
+Train set:
+
+![Batch correction UMAP + accuracy (train)](../../diagnostics/figures/batch_correction_umap_and_accuracy_train.png)
+
+Global test set:
+
+![Batch correction UMAP + accuracy (test)](../../diagnostics/figures/batch_correction_umap_and_accuracy_test.png)
 
 How to generate:
 ```bash
 python scripts/generate_presentation_batch_celltype_figure.py \
   --data_path data/processed \
   --out_path diagnostics/figures/batch_correction_umap_and_accuracy.png \
+  --split both \
   --seed 42 \
   --max_points 200000
 ```
@@ -148,6 +157,7 @@ Optional overrides (if your keys differ):
 ```bash
 python scripts/generate_presentation_batch_celltype_figure.py \
   --data_path data/processed \
+  --split both \
   --batch_key client_id \
   --celltype_key label
 ```
