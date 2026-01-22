@@ -40,3 +40,5 @@ outputs/test_*/
 
 # Git submodules (tracked separately, but ignore if accidentally cloned)
 # Note: temp_nicheformer is a submodule pointing to https://github.com/theislab/nicheformer.git
+
+temp_nicheformer

@@ -4,7 +4,7 @@
   "num_workers": 4,
   "include_spatial": true,
   "num_genes": 248,
-  "num_labels": 24,
+  "num_labels": 23,
   "fine_tune_mode": "head_only",
   "pretrained_path": "data/pretrained/nicheformer_pretrained.ckpt",
   "hidden_dim": 256,
@@ -16,7 +16,7 @@
   "weight_decay": 1e-05,
   "scheduler_type": "cosine",
   "device": "cuda",
-  "output_dir": "results\\centralized",
+  "output_dir": "results/centralized",
   "experiment_name": "centralized",
   "save_frequency": 1,
   "validate_every": 1

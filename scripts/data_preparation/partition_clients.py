@@ -1,59 +1,112 @@
-import os, json
+import os
+import json
 import numpy as np
 import pandas as pd
 
+# -----------------------------
+# Paths and config
+# -----------------------------
 IN_PATH = os.path.join("data", "processed", "processed_table.parquet")
-OUT_DIR = os.path.join("data", "processed", "clients")
-LABEL_COL = "label"
+OUT_DIR = os.path.join("data", "processed")
+CLIENTS_DIR = os.path.join(OUT_DIR, "clients")
+GLOBAL_DIR = os.path.join(OUT_DIR, "global")
+
 CLIENT_COL = "sample_id"
-SPLIT = (0.8, 0.1, 0.1)
+LABEL_COL = "label"
 
-os.makedirs(OUT_DIR, exist_ok=True)
-df = pd.read_parquet(IN_PATH)
+GLOBAL_TEST_RATIO = 0.2        # 20% global test
+CLIENT_TRAIN_VAL = (0.9, 0.1)  # 90% train, 10% val (per client)
+SEED = 42
 
-def stratified_split(df0, label_col, seed=42, split=SPLIT):
-    rng = np.random.default_rng(seed)
-    tr_parts, va_parts, te_parts = [], [], []
-    for _, sub in df0.groupby(label_col):
+os.makedirs(CLIENTS_DIR, exist_ok=True)
+os.makedirs(GLOBAL_DIR, exist_ok=True)
+
+rng = np.random.default_rng(SEED)
+
+# -----------------------------
+# Helper: stratified split
+# -----------------------------
+def stratified_split(df, label_col, ratios):
+    parts = [[] for _ in ratios]
+    for _, sub in df.groupby(label_col):
         idx = sub.index.to_numpy()
         rng.shuffle(idx)
         n = len(idx)
-        n_tr = int(n * split[0])
-        n_va = int(n * split[1])
-        tr_parts.append(df0.loc[idx[:n_tr]])
-        va_parts.append(df0.loc[idx[n_tr:n_tr+n_va]])
-        te_parts.append(df0.loc[idx[n_tr+n_va:]])
-    return pd.concat(tr_parts), pd.concat(va_parts), pd.concat(te_parts)
+        splits = [int(r * n) for r in ratios[:-1]]
+        splits.append(n - sum(splits))
+        start = 0
+        for i, size in enumerate(splits):
+            parts[i].append(df.loc[idx[start:start + size]])
+            start += size
+    return [pd.concat(p).reset_index(drop=True) for p in parts]
 
+# -----------------------------
+# Load data
+# -----------------------------
+df = pd.read_parquet(IN_PATH)
+print(f"Loaded {len(df)} rows")
+
+# -----------------------------
+# 1️⃣ GLOBAL TEST SPLIT (ONCE)
+# -----------------------------
+train_pool, global_test = stratified_split(
+    df,
+    LABEL_COL,
+    ratios=(1 - GLOBAL_TEST_RATIO, GLOBAL_TEST_RATIO)
+)
+
+global_test_path = os.path.join(GLOBAL_DIR, "test.parquet")
+global_test.to_parquet(global_test_path, index=False)
+
+print(f"Global test set: {len(global_test)} samples")
+
+# -----------------------------
+# 2️⃣ FEDERATED CLIENT SPLIT
+# -----------------------------
 global_meta = {}
 
-for i, (client_id, cdf) in enumerate(df.groupby(CLIENT_COL), start=1):
+for i, (client_id, cdf) in enumerate(train_pool.groupby(CLIENT_COL), start=1):
     client_name = f"client_{i:02d}"
-    cdir = os.path.join(OUT_DIR, client_name)
+    cdir = os.path.join(CLIENTS_DIR, client_name)
     os.makedirs(cdir, exist_ok=True)
 
-    tr, va, te = stratified_split(cdf, LABEL_COL, seed=42)
+    train_df, val_df = stratified_split(
+        cdf,
+        LABEL_COL,
+        ratios=CLIENT_TRAIN_VAL
+    )
 
-    tr.to_parquet(os.path.join(cdir, "train.parquet"), index=False)
-    va.to_parquet(os.path.join(cdir, "val.parquet"), index=False)
-    te.to_parquet(os.path.join(cdir, "test.parquet"), index=False)
+    train_df.to_parquet(os.path.join(cdir, "train.parquet"), index=False)
+    val_df.to_parquet(os.path.join(cdir, "val.parquet"), index=False)
 
     meta = {
         "client_name": client_name,
         "group_value": str(client_id),
         "split_axis": CLIENT_COL,
         "n_total": int(len(cdf)),
-        "n_train": int(len(tr)),
-        "n_val": int(len(va)),
-        "n_test": int(len(te)),
+        "n_train": int(len(train_df)),
+        "n_val": int(len(val_df)),
+        "has_test": False,
         "label_counts_total": cdf[LABEL_COL].value_counts().to_dict(),
     }
+
     with open(os.path.join(cdir, "client_meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
 
     global_meta[client_name] = meta
 
-with open(os.path.join("data", "processed", "global_metadata.json"), "w") as f:
-    json.dump(global_meta, f, indent=2)
+# -----------------------------
+# Save global metadata
+# -----------------------------
+global_info = {
+    "global_test_size": int(len(global_test)),
+    "global_test_path": global_test_path,
+    "num_clients": len(global_meta),
+    "seed": SEED,
+}
 
-print(f"Saved {len(global_meta)} clients to {OUT_DIR}")
+with open(os.path.join(OUT_DIR, "global_metadata.json"), "w") as f:
+    json.dump(global_info, f, indent=2)
+
+print(f"Saved {len(global_meta)} clients")
+print("✔ Global test split complete")

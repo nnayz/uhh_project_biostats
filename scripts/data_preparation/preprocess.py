@@ -60,7 +60,14 @@ sc.pp.neighbors(adata, n_neighbors=15, n_pcs=30)
 # -----------------------------
 # 4) Leiden clustering (LABELS)
 # -----------------------------
-sc.tl.leiden(adata, resolution=0.5, key_added="cluster")
+sc.tl.leiden(
+    adata,
+    resolution=0.5,
+    key_added="cluster",
+    flavor="igraph",
+    n_iterations=2,
+    directed=False
+)
 
 labels = adata.obs["cluster"].astype(str)
 uniq = sorted(labels.unique())
