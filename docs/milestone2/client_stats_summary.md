@@ -126,38 +126,87 @@ The client diagnostics confirm that the data preparation and federated partition
 
 ---
 
-## Batch Correction UMAP + Accuracy (Presentation Figure)
+## Global Test: Cell-Type Distribution (UMAP)
 
-UMAP colored by client (batch) and cell type before/after batch correction; shows client heterogeneity and correction effectiveness. Bottom panel compares centralized vs federated accuracy on the global test set (and SMPC variant if present in `results/`).
+### Overview
 
-Figures:
-- `diagnostics/figures/batch_correction_umap_and_accuracy_train.png`
-- `diagnostics/figures/batch_correction_umap_and_accuracy_test.png`
-- `diagnostics/figures/batch_correction_umap_and_accuracy.png` (alias of test)
+The global test set UMAP visualization provides a low-dimensional embedding of the test data colored by cell type/label. This figure intentionally **does not perform batch correction** to show the raw distribution of cell types in the test set.
 
-Train set:
+**Purpose:**
+- Visualize the global test set cell-type distribution
+- Assess label separation in embedding space
+- Provide a baseline for comparison with federated training results
 
-![Batch correction UMAP + accuracy (train)](../../diagnostics/figures/batch_correction_umap_and_accuracy_train.png)
+**Output:**
+- Left panel: UMAP embedding colored by cell type/label
+- Right panel: Horizontal bar chart showing cell-type proportions in the plotted test set
 
-Global test set:
+### Figure Location
 
-![Batch correction UMAP + accuracy (test)](../../diagnostics/figures/batch_correction_umap_and_accuracy_test.png)
+- `diagnostics/figures/test_cell_distribution_umap.png`
 
-How to generate:
+![Global test cell-type distribution](../../diagnostics/figures/test_cell_distribution_umap.png)
+
+### Script: `generate_test_cell_distribution_figure.py`
+
+**Input Requirements:**
+- `data/processed/global/test.parquet` - Global test set parquet file
+- `data/processed/genes.txt` (optional) - Gene schema for consistent column ordering
+
+**Output:**
+- Single PNG figure with UMAP embedding and cell-type proportions
+
+**Key Features:**
+- Automatically infers cell-type column (checks: `cell_type`, `celltype`, `label`, `y`, `annotation`, `cluster`)
+- Handles numeric labels by prefixing with "L" (e.g., `0` → `L0`)
+- Samples data if `--max_points` is smaller than test set size
+- Applies normalization/log1p only if data appears count-like
+- Uses deterministic random seed for reproducibility
+
+### Usage
+
+**Basic usage:**
 ```bash
-python scripts/generate_presentation_batch_celltype_figure.py \
+python scripts/generate_test_cell_distribution_figure.py \
   --data_path data/processed \
-  --out_path diagnostics/figures/batch_correction_umap_and_accuracy.png \
-  --split both \
+  --out_path diagnostics/figures/test_cell_distribution_umap.png \
   --seed 42 \
   --max_points 200000
 ```
 
-Optional overrides (if your keys differ):
+**Parameters:**
+- `--data_path`: Path to processed data directory (default: `data/processed`)
+  - Expects: `data/processed/global/test.parquet`
+  - Also accepts: Direct path to `.h5ad` file
+- `--out_path`: Output path for figure (default: `diagnostics/figures/test_cell_distribution_umap.png`)
+- `--seed`: Random seed for sampling and UMAP (default: `42`)
+- `--max_points`: Maximum number of cells to plot (default: `200000`)
+  - If test set is larger, cells are randomly sampled
+- `--celltype_key`: Override cell-type column name (default: auto-inferred)
+
+**Example with custom cell-type key:**
 ```bash
-python scripts/generate_presentation_batch_celltype_figure.py \
+python scripts/generate_test_cell_distribution_figure.py \
   --data_path data/processed \
-  --split both \
-  --batch_key client_id \
-  --celltype_key label
+  --celltype_key label \
+  --max_points 100000 \
+  --seed 42
 ```
+
+### Technical Details
+
+**UMAP Computation:**
+1. Data preprocessing:
+   - Normalizes total counts to 10,000 per cell (if count-like)
+   - Applies log1p transformation (if count-like)
+   - Scales features (max value = 10)
+2. Dimensionality reduction:
+   - PCA with 30 components (or fewer if insufficient features)
+   - Neighbors graph (15 neighbors, using top PCs)
+   - UMAP embedding (2D)
+3. Visualization:
+   - Colors cells by inferred cell-type column
+   - Limits to 30 categories (others grouped as "Other")
+   - Uses color palette from `tab20`, `tab20b`, `tab20c`, `Set3`, `Paired`, `Accent`
+
+**Note:** This script intentionally does NOT perform batch correction to show the raw test set distribution. For batch-corrected visualizations, use other analysis scripts.

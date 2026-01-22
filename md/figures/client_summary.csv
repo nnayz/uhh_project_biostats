@@ -1,2 +1,4 @@
 client,group_value,n_total,n_train,n_val,n_test,n_classes_present,max_label_fraction,min_label_count
-client_01,replicate 1,129583,116614,12969,0,23,0.0886767554385992,1632
+client_01,replicate 1,129392,116443,12949,0,23,0.08953412884876963,483
+client_02,replicate 2,123639,111266,12373,0,23,0.08888781048051181,442
+client_03,replicate 3,126596,113925,12671,0,23,0.08785427659641695,427

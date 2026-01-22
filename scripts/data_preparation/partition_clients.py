@@ -29,7 +29,7 @@ rng = np.random.default_rng(SEED)
 def stratified_split(df, label_col, ratios):
     parts = [[] for _ in ratios]
     for _, sub in df.groupby(label_col):
-        idx = sub.index.to_numpy()
+        idx = sub.index.to_numpy(copy=True)
         rng.shuffle(idx)
         n = len(idx)
         splits = [int(r * n) for r in ratios[:-1]]

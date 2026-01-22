@@ -18,7 +18,8 @@ Prepare a clean, reproducible Milestone 2 dataset and diagnostics so the reposit
   - `genes.txt` (gene schema / order)
   - `label_map.json` (pseudo-label encoding)
   - `global_metadata.json` (client summary)
-  - `clients/client_XX/{train,val,test}.parquet` and `client_meta.json`
+  - `global/test.parquet` (global test split)
+  - `clients/client_XX/{train,val}.parquet` and `client_meta.json`
 - Documentation
   - `md/data_dictionary.md` (data contract)
   - `md/preprocessing_notes.md` (pseudo-labeling + preprocessing decisions)
@@ -41,11 +42,19 @@ Details: `md/preprocessing_notes.md`
 Run in this order:
 
 ```bash
-python scripts/download_raw.py
-python scripts/validate_raw.py
-python scripts/preprocess.py
-python scripts/partition_clients.py
-python scripts/client_stats.py
+# If you're using the repo venv, replace `python` with `.venv/bin/python`
+python scripts/data_preparation/download_raw.py
+python scripts/data_preparation/validate_raw.py
+python scripts/data_preparation/preprocess.py
+python scripts/data_preparation/partition_clients.py
+python scripts/data_preparation/client_stats.py
+
+# Global test: cell-type distribution UMAP (no batch correction)
+python scripts/generate_test_cell_distribution_figure.py \
+  --data_path data/processed \
+  --out_path diagnostics/figures/test_cell_distribution_umap.png \
+  --seed 42 \
+  --max_points 200000
 ```
 
 ### Expected outputs after running
@@ -63,8 +72,7 @@ python scripts/client_stats.py
 - `md/figures/per_client_label_distribution.png`
 - `md/figures/client_imbalance_max_fraction.png`
 - `md/figures/client_jsd_to_global.png`
-- `diagnostics/figures/batch_correction_umap_and_accuracy_train.png`
-- `diagnostics/figures/batch_correction_umap_and_accuracy_test.png`
+- `diagnostics/figures/test_cell_distribution_umap.png`
 
 ## Traceability
 - Data contract: `md/data_dictionary.md`

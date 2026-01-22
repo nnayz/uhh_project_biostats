@@ -259,20 +259,17 @@ md_lines.append(
     ].to_markdown(index=False)
 )
 md_lines.append("\n\n")
-md_lines.append("## Batch correction UMAP + accuracy (presentation)\n")
+md_lines.append("## Global test: cell-type distribution (UMAP)\n")
 md_lines.append(
-    "UMAP colored by client (batch) and cell type before/after batch correction. "
-    "Train embedding uses pooled client train+val; test embedding uses the global test set. "
-    "Bottom panel compares centralized vs federated accuracy on the global test set.\n\n"
+    "UMAP of the global test set (no batch correction), colored by cell type/label. "
+    "The right panel summarizes cell-type proportions for the plotted test set.\n\n"
 )
-md_lines.append("- `diagnostics/figures/batch_correction_umap_and_accuracy_train.png`\n")
-md_lines.append("- `diagnostics/figures/batch_correction_umap_and_accuracy_test.png`\n")
-md_lines.append("- `diagnostics/figures/batch_correction_umap_and_accuracy.png` (alias of test)\n\n")
+md_lines.append("- `diagnostics/figures/test_cell_distribution_umap.png`\n\n")
 md_lines.append("How to generate:\n")
 md_lines.append("```bash\n")
-md_lines.append("python scripts/generate_presentation_batch_celltype_figure.py \\\n")
+md_lines.append("python scripts/generate_test_cell_distribution_figure.py \\\n")
 md_lines.append("  --data_path data/processed \\\n")
-md_lines.append("  --split both \\\n")
+md_lines.append("  --out_path diagnostics/figures/test_cell_distribution_umap.png \\\n")
 md_lines.append("  --seed 42 \\\n")
 md_lines.append("  --max_points 200000\n")
 md_lines.append("```\n")

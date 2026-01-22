@@ -1,5 +1,5 @@
 {
-  "global_test_size": 94920,
+  "global_test_size": 94918,
   "global_test_path": "data/processed/global/test.parquet",
   "num_clients": 3,
   "seed": 42

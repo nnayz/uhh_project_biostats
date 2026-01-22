@@ -42,3 +42,5 @@ outputs/test_*/
 # Note: temp_nicheformer is a submodule pointing to https://github.com/theislab/nicheformer.git
 
 temp_nicheformer
+
+.numba_cache/
