@@ -10,7 +10,7 @@ Key features:
 4) Add basic spatial scaling to avoid huge coordinate magnitudes destabilizing training.
 5) Requires Nicheformer package - no placeholder fallback.
 
-Contract Reference: docs/milestone3/contracts/model_contract.md
+See training.md (project root) for model contract summary.
 """
 
 from __future__ import annotations
@@ -21,6 +21,20 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+
+# One-time log per process (avoids spam when federated creates many client models)
+_pretrained_load_logged = False
+_new_model_logged = False
+
+
+def _log_pretrained_loaded() -> None:
+    global _pretrained_load_logged
+    _pretrained_load_logged = True
+
+
+def _log_new_model_created() -> None:
+    global _new_model_logged
+    _new_model_logged = True
 
 
 class NicheformerWrapper(nn.Module):
@@ -116,7 +130,9 @@ class NicheformerWrapper(nn.Module):
             ) from e
 
         if pretrained_path and os.path.exists(pretrained_path):
-            print(f"Loading pretrained Nicheformer from {pretrained_path}")
+            # Only print once per process (federated creates one model per client per round)
+            if not _pretrained_load_logged:
+                print(f"Loading pretrained Nicheformer from {pretrained_path}")
             try:
                 # Lightning checkpoint
                 # Note: weights_only=False is needed for PyTorch 2.6+ due to numpy objects in checkpoint
@@ -124,11 +140,13 @@ class NicheformerWrapper(nn.Module):
                 import torch.serialization
                 torch.serialization.add_safe_globals([type(torch.tensor(0).numpy().item())])
                 nf = Nicheformer.load_from_checkpoint(
-                    pretrained_path, 
+                    pretrained_path,
                     map_location="cpu",
                     weights_only=False  # Required for checkpoints with numpy objects
                 )
-                print("Successfully loaded Nicheformer backbone")
+                if not _pretrained_load_logged:
+                    print("Successfully loaded Nicheformer backbone")
+                    _log_pretrained_loaded()
                 return nf.encoder
             except Exception as e:
                 raise RuntimeError(
@@ -136,7 +154,8 @@ class NicheformerWrapper(nn.Module):
                 ) from e
 
         # No checkpoint: create a fresh Nicheformer (still uses its encoder)
-        print("Creating new Nicheformer model (no pretrained weights)")
+        if not _new_model_logged:
+            print("Creating new Nicheformer model (no pretrained weights)")
         try:
             nf = Nicheformer(
                 dim_model=hidden_dim,
@@ -153,7 +172,9 @@ class NicheformerWrapper(nn.Module):
                 batch_size=32,
                 max_epochs=10,
             )
-            print("Created new Nicheformer model")
+            if not _new_model_logged:
+                print("Created new Nicheformer model")
+                _log_new_model_created()
             return nf.encoder
         except Exception as e:
             raise RuntimeError(f"Failed to create Nicheformer model: {e}") from e

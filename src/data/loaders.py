@@ -4,7 +4,7 @@ Data Loaders Module - Milestone 3
 Implements the Data Contract API for loading federated client data.
 All training, federated, and evaluation code must use this interface.
 
-Contract Reference: docs/milestone3/contracts/data_contract.md
+See data_preparation.md and training.md (project root) for schema and usage.
 """
 
 import os
@@ -19,13 +19,11 @@ import numpy as np
 class CellDataset(Dataset):
     """
     PyTorch Dataset for spatial transcriptomics cells.
-    
-    Each sample contains:
-    - Gene expression features (248 genes)
-    - Spatial coordinates (x, y)
-    - Label (pseudo-label from Leiden clustering)
+    Uses lazy per-sample access to avoid duplicating the DataFrame in large
+    float arrays, which reduces memory (important for federated Ray actors).
+    Each sample contains: gene expression, optional (x,y), label.
     """
-    
+
     def __init__(self, df: pd.DataFrame, gene_columns: List[str], include_spatial: bool = True):
         """
         Args:
@@ -36,45 +34,29 @@ class CellDataset(Dataset):
         self.df = df.reset_index(drop=True)
         self.gene_columns = gene_columns
         self.include_spatial = include_spatial
-        
-        # Validate gene columns exist
+
         missing_genes = [g for g in gene_columns if g not in df.columns]
         if missing_genes:
             raise ValueError(f"Missing gene columns: {missing_genes[:5]}...")
-        
-        # Extract features and labels
-        self.gene_features = self.df[gene_columns].values.astype(np.float32)
-        self.labels = self.df['label'].values.astype(np.int64)
-        
-        if include_spatial:
-            self.spatial_coords = self.df[['x', 'y']].values.astype(np.float32)
-        else:
-            self.spatial_coords = None
-    
+
     def __len__(self) -> int:
         return len(self.df)
-    
+
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        """
-        Returns:
-            Dictionary with:
-            - 'features': gene expression + optionally spatial coords
-            - 'label': classification label
-            - 'x': spatial x coordinate
-            - 'y': spatial y coordinate
-        """
-        features = torch.from_numpy(self.gene_features[idx])
-        
+        row = self.df.iloc[idx]
+        features = torch.from_numpy(
+            row[self.gene_columns].values.astype(np.float32, copy=False)
+        )
         if self.include_spatial:
-            spatial = torch.from_numpy(self.spatial_coords[idx])
-            # Concatenate gene expression with spatial coordinates
+            spatial = torch.tensor(
+                [row["x"], row["y"]], dtype=torch.float32
+            )
             features = torch.cat([features, spatial])
-        
         return {
-            'features': features,
-            'label': torch.tensor(self.labels[idx], dtype=torch.long),
-            'x': torch.tensor(self.df.iloc[idx]['x'], dtype=torch.float32),
-            'y': torch.tensor(self.df.iloc[idx]['y'], dtype=torch.float32),
+            "features": features,
+            "label": torch.tensor(row["label"], dtype=torch.long),
+            "x": torch.tensor(row["x"], dtype=torch.float32),
+            "y": torch.tensor(row["y"], dtype=torch.float32),
         }
 
 
@@ -171,6 +153,9 @@ def load_all_clients(
         
     Returns:
         Combined DataFrame from all clients
+        
+    Note:
+        For "test" split, use load_global_test() instead to get the global test set.
     """
     clients_dir = os.path.join(data_dir, "clients")
     if not os.path.exists(clients_dir):
@@ -203,6 +188,47 @@ def load_all_clients(
         _validate_dataframe(combined_df, data_dir)
     
     return combined_df
+
+
+def load_global_test(
+    data_dir: str = "data/processed",
+    include_spatial: bool = True,
+    validate: bool = True
+) -> pd.DataFrame:
+    """
+    Load the evaluation set: held-out batch (batch-based) or global test set (legacy).
+    
+    Used for evaluation in centralized, federated, and local training.
+    Prefer held_out_batch.parquet when present (batch-based strategy).
+    
+    Args:
+        data_dir: Path to processed data directory
+        include_spatial: Whether to include spatial coordinates (for future use)
+        validate: Whether to validate schema
+        
+    Returns:
+        DataFrame with columns: id, sample_id/batch_id, x, y, label, gene_*
+    """
+    held_out_path = os.path.join(data_dir, "held_out_batch.parquet")
+    global_test_path = os.path.join(data_dir, "global_test.parquet")
+    path = held_out_path if os.path.exists(held_out_path) else global_test_path
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"Evaluation set not found. Looked for: {held_out_path}, {global_test_path}\n"
+            "Please run scripts/data_preparation/partition_anatomical_siloing.py first."
+        )
+    df = pd.read_parquet(path)
+    if validate:
+        _validate_dataframe(df, data_dir)
+    return df
+
+
+def load_held_out_eval(
+    data_dir: str = "data/processed",
+    validate: bool = True
+) -> pd.DataFrame:
+    """Load the held-out batch evaluation set (alias for load_global_test)."""
+    return load_global_test(data_dir=data_dir, validate=validate)
 
 
 def create_dataloader(

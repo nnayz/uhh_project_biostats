@@ -1,0 +1,4 @@
+client,group_value,n_total,n_train,n_val,n_test,n_classes_present,max_label_fraction
+client_01,dorsal,105511,84399,21112,0,24,0.2208
+client_02,mid,105541,84425,21116,0,23,0.2063
+client_03,ventral,105511,84396,21115,0,23,0.2052

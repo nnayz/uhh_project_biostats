@@ -44,6 +44,7 @@ from src.data import (
     load_client_data,
     load_gene_list,
     load_label_map,
+    load_global_test,
 )
 from src.model import create_model
 from src.training import (
@@ -171,7 +172,7 @@ def main() -> None:
     if not clients:
         raise FileNotFoundError(
             f"No clients found under {Path(data_dir) / 'clients'}. "
-            "Make sure Milestone 2 outputs exist, or pass --data_dir to the correct location."
+            "Run data preparation (partition_anatomical_siloing.py) first, or pass --data_dir to the correct location."
         )
 
     genes = load_gene_list(data_dir)
@@ -179,7 +180,8 @@ def main() -> None:
 
     train_df = load_all_clients("train", data_dir=data_dir, validate=True)
     val_df = load_all_clients("val", data_dir=data_dir, validate=True)
-    test_df = load_all_clients("test", data_dir=data_dir, validate=True)
+    # Held-out set: used only for final evaluation after training (not during the training loop)
+    test_df = load_global_test(data_dir=data_dir, validate=True)
 
     if args.max_train is not None and len(train_df) > args.max_train:
         train_df = train_df.sample(n=args.max_train, random_state=args.seed).reset_index(drop=True)
@@ -243,36 +245,27 @@ def main() -> None:
         if scheduler is not None:
             scheduler.step()
 
-    print("\nFinal evaluation on pooled test")
-    pooled_test = evaluate(model, test_loader, device, verbose=True, use_amp=use_amp)
-
-    per_client_test: Dict[str, Dict[str, float]] = {}
-    for cid in clients:
-        cdf = load_client_data(cid, "test", data_dir=data_dir, validate=True)
-        cloader = create_dataloader(
-            cdf, genes, batch_size=args.batch_size, shuffle=False,
-            include_spatial=include_spatial, num_workers=args.num_workers,
-            pin_memory=(args.device == "cuda"),
-        )
-        print(f"Client {cid} test:")
-        m = evaluate(model, cloader, device, verbose=True, use_amp=use_amp)
-        per_client_test[cid] = {"loss": m["loss"], "accuracy": m["accuracy"], "f1_macro": m["f1_macro"]}
+    print("\nFinal evaluation on global test set")
+    global_test_metrics = evaluate(model, test_loader, device, verbose=True, use_amp=use_amp)
 
     _save_training_curves(history, plots_dir / "loss_curve.png")
-    _save_confusion_matrix(pooled_test["labels"], pooled_test["predictions"], num_labels, plots_dir / "confusion_matrix.png")
-    _save_per_client_accuracy(per_client_test, plots_dir / "per_client_accuracy.png")
-
+    _save_confusion_matrix(global_test_metrics["labels"], global_test_metrics["predictions"], num_labels, plots_dir / "confusion_matrix.png")
+    
+    # Note: Per-client test evaluation removed since we now use a global test set
+    # All clients are evaluated on the same global test set for fair comparison
     eval_summary = {
-        "global_test": {"loss": pooled_test["loss"], "accuracy": pooled_test["accuracy"], "f1_macro": pooled_test["f1_macro"]},
-        "per_client_test": per_client_test,
+        "global_test": {
+            "loss": global_test_metrics["loss"],
+            "accuracy": global_test_metrics["accuracy"],
+            "f1_macro": global_test_metrics["f1_macro"],
+            "total_samples": len(test_df),
+        },
         "clients": clients,
     }
     with open(out_dir / "eval_summary.json", "w") as f:
         json.dump(eval_summary, f, indent=2)
 
-    rows = [{"split": "pooled_test", **eval_summary["global_test"]}]
-    for cid, m in per_client_test.items():
-        rows.append({"split": f"test_{cid}", **m})
+    rows = [{"split": "global_test", **eval_summary["global_test"]}]
     pd.DataFrame(rows).to_csv(out_dir / "metrics.csv", index=False)
 
     config = TrainingConfig(

@@ -7,7 +7,7 @@ Each client:
   - calls the shared training engine
   - returns updated weights
 
-Contract Reference: docs/milestone3/contracts/federation_contract.md
+See training.md (project root) for federated training summary.
 """
 
 from __future__ import annotations

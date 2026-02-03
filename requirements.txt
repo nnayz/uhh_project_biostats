@@ -16,6 +16,7 @@ flwr>=1.5.0  # Flower framework for federated learning
 scanpy>=1.9.0  # Single-cell analysis
 huggingface-hub>=0.16.0  # For downloading datasets
 pyarrow>=10.0.0  # Parquet file support
+tqdm>=4.65.0  # Progress bars (preprocess, etc.)
 
 # Visualization & Plotting
 matplotlib>=3.6.0
@@ -30,7 +31,6 @@ seaborn>=0.12.0
 #
 # pytorch-lightning>=2.0.0
 # torchmetrics>=1.4.0
-# wandb>=0.17.0
 # anndata
 # squidpy
 # pyensembl==2.3.13

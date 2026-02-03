@@ -1,0 +1,12 @@
+{
+  "client_id": "client_02",
+  "client_label": "client02_mid",
+  "global_test": {
+    "loss": 0.5644854311741168,
+    "accuracy": 0.901919205985492,
+    "f1_macro": 0.8324242094772697,
+    "total_samples": 157982
+  },
+  "train_samples": 84425,
+  "val_samples": 21116
+}

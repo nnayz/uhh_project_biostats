@@ -8,7 +8,7 @@ The server:
   - Aggregates updates using FedAvg
   - Logs round-level metrics
 
-Contract Reference: docs/milestone3/contracts/federation_contract.md
+See training.md (project root) for federated training summary.
 """
 
 from __future__ import annotations

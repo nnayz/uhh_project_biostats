@@ -4,7 +4,7 @@ Shared Training Engine - Milestone 3
 Provides reusable training and evaluation functions used by both
 centralized and federated training pipelines.
 
-Contract Reference: docs/milestone3/contracts/training_contract.md
+See training.md (project root) for training contract summary.
 """
 
 import torch

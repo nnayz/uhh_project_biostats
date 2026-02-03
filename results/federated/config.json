@@ -1,10 +1,10 @@
 {
   "data_dir": "data/processed",
   "output_dir": "results\\federated",
-  "num_rounds": 5,
+  "num_rounds": 10,
   "clients_per_round": 3,
-  "local_epochs": 2,
-  "batch_size": 1024,
+  "local_epochs": 3,
+  "batch_size": 512,
   "learning_rate": 0.0001,
   "weight_decay": 1e-05,
   "fine_tune_mode": "head_only",

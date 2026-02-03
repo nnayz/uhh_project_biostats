@@ -1,0 +1,2 @@
+split,loss,accuracy,f1_macro,total_samples
+global_test,3.334051355479225,0.6198047878872277,0.541908577491773,157982

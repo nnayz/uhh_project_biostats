@@ -1,0 +1,12 @@
+{
+  "client_id": "client_01",
+  "client_label": "client01_dorsal",
+  "global_test": {
+    "loss": 3.334051355479225,
+    "accuracy": 0.6198047878872277,
+    "f1_macro": 0.541908577491773,
+    "total_samples": 157982
+  },
+  "train_samples": 84399,
+  "val_samples": 21112
+}
